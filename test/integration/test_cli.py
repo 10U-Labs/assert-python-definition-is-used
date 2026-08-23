@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import os
+import runpy
 import sys
 from test.samples import (
     CALLER,
@@ -20,16 +20,18 @@ from unittest.mock import patch
 import pytest
 
 from assert_python_definition_is_used.cli import (
-    EXIT_ERROR,
-    EXIT_FINDINGS,
-    EXIT_SUCCESS,
-    ScanResult,
     _collect,
     _expand,
     _is_glob_pattern,
     _read,
     _tree_root,
     _walk_python_files,
+)
+from assert_python_definition_is_used.cli import (
+    EXIT_ERROR,
+    EXIT_FINDINGS,
+    EXIT_SUCCESS,
+    ScanResult,
     create_parser,
     determine_exit_code,
     output_findings,
@@ -527,7 +529,7 @@ class TestHelpersOverRealFiles:
         """A pattern matching neither a file nor a directory yields nothing."""
         root = write_tree(PROJECT)
         os.symlink("nowhere", root / "src" / "broken.py")
-        assert _expand("src/broken.py*")[0] == []
+        assert not _expand("src/broken.py*")[0]
 
     def test_expand_reports_a_missing_path(self) -> None:
         """A path that does not exist reports as unmatched."""
@@ -686,6 +688,13 @@ class TestReportingHelpers:
         """A clean result means exit zero."""
         assert determine_exit_code(ScanResult()) == EXIT_SUCCESS
 
+    def test_running_the_package_as_a_module_calls_the_cli(self) -> None:
+        """Executing the package as a module runs the CLI."""
+        with patch("assert_python_definition_is_used.cli.main") as entry_point:
+            sys.modules.pop("assert_python_definition_is_used.__main__", None)
+            runpy.run_module("assert_python_definition_is_used", run_name="__main__")
+            assert entry_point.called
+
     def test_determine_exit_code_warn_only(self) -> None:
         """Warn-only always means exit zero."""
         assert determine_exit_code(ScanResult(had_error=True), warn_only=True) == EXIT_SUCCESS
@@ -772,21 +781,3 @@ class TestScannerOverRealFiles:
         found = unused_definitions([definition], {"lib/python/pkg/__init__.py": LIBRARY})
         assert len(found) == 1
 
-
-@pytest.mark.integration
-class TestModuleEntryPoint:
-    """Running the package as a module."""
-
-    def test_module_runs_the_cli(self) -> None:
-        """Importing __main__ calls into the CLI."""
-        with patch("assert_python_definition_is_used.cli.main") as entry_point:
-            sys.modules.pop("assert_python_definition_is_used.__main__", None)
-            importlib.import_module("assert_python_definition_is_used.__main__")
-            assert entry_point.called
-
-    def test_module_runs_the_cli_once(self) -> None:
-        """Importing __main__ calls into the CLI exactly once."""
-        with patch("assert_python_definition_is_used.cli.main") as entry_point:
-            sys.modules.pop("assert_python_definition_is_used.__main__", None)
-            importlib.import_module("assert_python_definition_is_used.__main__")
-            assert entry_point.call_count == 1

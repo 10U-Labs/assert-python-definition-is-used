@@ -300,7 +300,7 @@ class TestExpand:
         """A pattern matching something that is neither file nor directory yields nothing."""
         root = write_tree(TREE)
         os.symlink("nowhere", root / "src" / "broken.py")
-        assert _expand("src/broken.py*")[0] == []
+        assert not _expand("src/broken.py*")[0]
 
     def test_reports_a_glob_matching_nothing(
         self, write_tree: Callable[[dict[str, str]], Path]
