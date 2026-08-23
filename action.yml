@@ -1,10 +1,6 @@
 ---
 description: Assert every public Python definition is used somewhere else
 inputs:
-  count-defining-file:
-    default: "false"
-    description: Count a name written elsewhere in its own file as a use
-    required: false
   dont-search-in:
     description: Template holding {package} to leave out of the search
     required: false
@@ -44,8 +40,6 @@ runs:
         [ "${{ inputs.verbose }}" = "true" ] && ARGS="$ARGS --verbose"
         [ "${{ inputs.fail-fast }}" = "true" ] && ARGS="$ARGS --fail-fast"
         [ "${{ inputs.warn-only }}" = "true" ] && ARGS="$ARGS --warn-only"
-        [ "${{ inputs.count-defining-file }}" = "true" ] && \
-          ARGS="$ARGS --count-defining-file"
         if [ -n "${{ inputs.exclude }}" ]; then
           ARGS="$ARGS --exclude '${{ inputs.exclude }}'"
         fi

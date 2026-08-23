@@ -13,6 +13,7 @@ from test.samples import (
     LIBRARY,
     OUTER_BOUND,
     PROJECT,
+    PROSE,
 )
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -46,8 +47,8 @@ from assert_python_definition_is_used.scanner import (
     Finding,
     is_public,
     is_used,
-    names_in_content,
-    names_in_line,
+    names_in_code,
+    names_in_text,
     unsearched_directory,
     public_definitions,
     unused_definitions,
@@ -82,25 +83,25 @@ class TestAgainstARealTree:
         _, stdout, _ = run_cli(FULL_RUN)
         assert "kept" not in stdout
 
-    def test_reports_the_definition_only_a_sibling_names(
+    def test_leaves_the_helper_its_own_file_calls_alone(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """A definition called only from its own file is reported."""
+        """A helper the defining file calls is used, so it is not reported."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(FULL_RUN)
-        assert "helper" in stdout
+        assert "helper" not in stdout
 
-    def test_the_defining_file_flag_credits_the_sibling(
+    def test_reports_the_definition_its_own_file_only_mentions(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """With the looser rule the sibling call counts and helper is not reported."""
-        write_tree(PROJECT)
-        _, stdout, _ = run_cli([*FULL_RUN, "--count-defining-file"])
-        assert "helper" not in stdout
+        """A name its own file writes only in prose is not used by it."""
+        write_tree({"lib/python/pkg/__init__.py": PROSE})
+        _, stdout, _ = run_cli(["lib/python"])
+        assert "documented" in stdout
 
     def test_without_the_flag_the_outer_bound_is_quiet_about_orphan(
         self,
@@ -241,7 +242,7 @@ class TestOutputModes:
         """Count mode prints how many findings there were."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli([*FULL_RUN, "--count"])
-        assert stdout == "2\n"
+        assert stdout == "1\n"
 
     def test_verbose_names_the_trees(
         self,
@@ -395,7 +396,7 @@ class TestBrokenInput:
         """Verbose mode ends by saying something went wrong."""
         root = write_tree({"lib/python/pkg/__init__.py": "def kept():\n    pass\nkept()\n"})
         os.symlink("nowhere", root / "lib" / "python" / "pkg" / "broken.py")
-        _, stdout, _ = run_cli(["lib/python", "--count-defining-file", "--verbose"])
+        _, stdout, _ = run_cli(["lib/python", "--verbose"])
         assert "Errors occurred during scanning." in stdout
 
 
@@ -411,7 +412,7 @@ class TestSelectingFiles:
         """A directory reaches the files below it."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "3\n"
+        assert stdout == "1\n"
 
     def test_a_file_can_be_named_directly(
         self,
@@ -421,7 +422,7 @@ class TestSelectingFiles:
         """A single file is a tree of one."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli([os.path.join("lib", "python", "pkg", "__init__.py"), "--count"])
-        assert stdout == "3\n"
+        assert stdout == "1\n"
 
     def test_a_recursive_glob_reaches_the_files(
         self,
@@ -431,7 +432,7 @@ class TestSelectingFiles:
         """A recursive pattern reaches the same files a directory does."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python/**/*.py", "--count"])
-        assert stdout == "3\n"
+        assert stdout == "1\n"
 
     def test_a_glob_matching_a_directory_is_walked(
         self,
@@ -441,7 +442,7 @@ class TestSelectingFiles:
         """A pattern matching a directory reaches the files inside it."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python/*", "--count"])
-        assert stdout == "3\n"
+        assert stdout == "1\n"
 
     def test_a_glob_matching_nothing_is_missing(
         self,
@@ -471,7 +472,7 @@ class TestSelectingFiles:
         """A file that is not Python is not parsed."""
         write_tree({**PROJECT, "lib/python/pkg/notes.txt": "def orphan():\n"})
         _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "3\n"
+        assert stdout == "1\n"
 
     def test_an_exclude_drops_a_definition_file(
         self,
@@ -726,21 +727,25 @@ class TestScannerOverRealFiles:
         """A leading underscore is not public."""
         assert is_public("_kept") is False
 
-    def test_names_in_line_matches_a_word(self) -> None:
-        """A whole word on the line is a match."""
-        assert names_in_line("kept", "kept()") is True
+    def test_names_in_text_matches_a_word(self) -> None:
+        """A whole word in the text is a match."""
+        assert names_in_text("kept", "kept()") is True
 
-    def test_names_in_line_ignores_a_substring(self) -> None:
+    def test_names_in_text_ignores_a_substring(self) -> None:
         """Part of a longer word is not a match."""
-        assert names_in_line("kept", "keptic()") is False
+        assert names_in_text("kept", "keptic()") is False
 
-    def test_names_in_content_reads_every_line(self) -> None:
+    def test_names_in_text_reads_every_line(self) -> None:
         """Any line naming it is enough."""
-        assert names_in_content("kept", CALLER) is True
+        assert names_in_text("kept", CALLER) is True
 
-    def test_names_in_content_skips_a_line(self) -> None:
-        """The skipped line does not count."""
-        assert names_in_content("orphan", "def orphan():\n    pass\n", skipped_line=1) is False
+    def test_names_in_code_reads_a_call(self) -> None:
+        """A call in the file's code is a use."""
+        assert names_in_code("kept", LIBRARY) is True
+
+    def test_names_in_code_ignores_a_definition(self) -> None:
+        """A def binds its name without reading it."""
+        assert names_in_code("orphan", "def orphan():\n    pass\n") is False
 
     def test_unsearched_directory_renders(self) -> None:
         """The package is substituted in."""

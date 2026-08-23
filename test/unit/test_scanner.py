@@ -9,8 +9,8 @@ from assert_python_definition_is_used.scanner import (
     Finding,
     is_public,
     is_used,
-    names_in_content,
-    names_in_line,
+    names_in_code,
+    names_in_text,
     unsearched_directory,
     public_definitions,
     unused_definitions,
@@ -143,50 +143,95 @@ class TestPublicDefinitions:
 
 
 @pytest.mark.unit
-class TestNamesInLine:
-    """Tests for names_in_line."""
+class TestNamesInText:
+    """Tests for names_in_text."""
 
     def test_finds_a_whole_word(self) -> None:
-        """A bare name on the line is a match."""
-        assert names_in_line("widget", "value = widget()") is True
+        """A bare name in the text is a match."""
+        assert names_in_text("widget", "value = widget()") is True
 
     def test_ignores_a_longer_word(self) -> None:
         """A name that is only part of a longer word is not a match."""
-        assert names_in_line("widget", "value = widgetry()") is False
+        assert names_in_text("widget", "value = widgetry()") is False
 
     def test_ignores_a_prefixed_word(self) -> None:
         """A name preceded by word characters is not a match."""
-        assert names_in_line("widget", "value = my_widget") is False
+        assert names_in_text("widget", "value = my_widget") is False
 
     def test_finds_an_attribute_access(self) -> None:
         """A dot is not a word character, so an attribute is a match."""
-        assert names_in_line("widget", "value = module.widget") is True
+        assert names_in_text("widget", "value = module.widget") is True
 
     def test_escapes_regex_characters(self) -> None:
         """A name is matched literally rather than as a pattern."""
-        assert names_in_line("a.b", "value = a.b") is True
+        assert names_in_text("a.b", "value = a.b") is True
+
+    def test_finds_a_name_on_any_line(self) -> None:
+        """Any line naming the identifier is enough."""
+        assert names_in_text("widget", "import x\nvalue = widget()\n") is True
+
+    def test_absent_name_is_not_found(self) -> None:
+        """Text that never names the identifier reports false."""
+        assert names_in_text("widget", "import x\n") is False
+
+    def test_counts_a_name_written_in_prose(self) -> None:
+        """The cross-file rule is blunt and credits a docstring too."""
+        assert names_in_text("widget", '"""Call widget() to begin."""\n') is True
 
 
 @pytest.mark.unit
-class TestNamesInContent:
-    """Tests for names_in_content."""
+class TestNamesInCode:
+    """Tests for names_in_code."""
 
-    def test_finds_a_name_anywhere(self) -> None:
-        """Any line naming the identifier is enough."""
-        assert names_in_content("widget", "import x\nvalue = widget()\n") is True
+    def test_finds_a_call(self) -> None:
+        """A call reads the name."""
+        assert names_in_code("widget", "widget()\n") is True
 
-    def test_absent_name_is_not_found(self) -> None:
-        """Content that never names the identifier reports false."""
-        assert names_in_content("widget", "import x\n") is False
+    def test_finds_a_call_from_a_sibling(self) -> None:
+        """A helper its own file calls is read."""
+        content = "def widget():\n    pass\n\n\ndef entry():\n    return widget()\n"
+        assert names_in_code("widget", content) is True
 
-    def test_skips_the_named_line(self) -> None:
-        """The skipped line does not count as a use."""
-        assert names_in_content("widget", "def widget():\n    pass\n", skipped_line=1) is False
+    def test_finds_a_decorator(self) -> None:
+        """A decorator reads the name."""
+        assert names_in_code("widget", "@widget\ndef wrapped():\n    pass\n") is True
 
-    def test_reads_the_other_lines(self) -> None:
-        """A line other than the skipped one still counts."""
-        content = "def widget():\n    pass\nwidget()\n"
-        assert names_in_content("widget", content, skipped_line=1) is True
+    def test_finds_a_base_class(self) -> None:
+        """A base class reads the name."""
+        assert names_in_code("widget", "class Sub(widget):\n    pass\n") is True
+
+    def test_finds_an_annotation(self) -> None:
+        """An annotation reads the name."""
+        assert names_in_code("widget", "value: widget = None\n") is True
+
+    def test_finds_a_parameter_of_that_name(self) -> None:
+        """A parameter is how a fixture is asked for, so it reads the name."""
+        assert names_in_code("widget", "def test_it(widget):\n    pass\n") is True
+
+    def test_ignores_a_definition_of_the_name(self) -> None:
+        """A def binds its name without reading it."""
+        assert names_in_code("widget", "def widget():\n    pass\n") is False
+
+    def test_ignores_a_docstring_mention(self) -> None:
+        """Prose about a definition is not a use of it."""
+        assert names_in_code("widget", '"""Call widget() to begin."""\n') is False
+
+    def test_ignores_an_all_entry(self) -> None:
+        """An __all__ entry advertises a name rather than reading it."""
+        assert names_in_code("widget", '__all__ = ["widget"]\n') is False
+
+    def test_ignores_a_rebinding(self) -> None:
+        """Assigning to the name overwrites it rather than reading it."""
+        assert names_in_code("widget", "widget = 3\n") is False
+
+    def test_ignores_an_unrelated_name(self) -> None:
+        """Code that never reads the identifier reports false."""
+        assert names_in_code("widget", "other()\n") is False
+
+    def test_content_that_will_not_parse_raises(self) -> None:
+        """Unparseable content raises, for the caller to report."""
+        with pytest.raises(SyntaxError):
+            names_in_code("widget", "def widget(:\n")
 
 
 @pytest.mark.unit
@@ -221,20 +266,20 @@ class TestIsUsed:
         sources = {MODULE: "def widget():\n    pass\n", "src/app.py": "widget()\n"}
         assert is_used(_definition(), sources) is True
 
-    def test_the_defining_file_does_not_count(self) -> None:
-        """By default the whole defining file is discounted."""
+    def test_the_defining_file_counts_as_code(self) -> None:
+        """A call from the defining file is a use, because a helper is used."""
         sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
+        assert is_used(_definition(), sources) is True
+
+    def test_the_defining_file_does_not_count_as_prose(self) -> None:
+        """A docstring in the defining file mentions the name without using it."""
+        sources = {MODULE: '"""Call widget()."""\n\n\ndef widget():\n    pass\n'}
         assert is_used(_definition(), sources) is False
 
-    def test_the_defining_file_counts_when_asked(self) -> None:
-        """With the flag, another line of the defining file is a use."""
-        sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
-        assert is_used(_definition(), sources, count_defining_file=True) is True
-
-    def test_the_defining_line_never_counts(self) -> None:
-        """Even with the flag, the definition's own line is not a use."""
+    def test_the_definition_never_counts_as_its_own_use(self) -> None:
+        """A file holding nothing but the definition does not use it."""
         sources = {MODULE: "def widget():\n    pass\n"}
-        assert is_used(_definition(), sources, count_defining_file=True) is False
+        assert is_used(_definition(), sources) is False
 
     def test_an_unsearched_directory_is_discounted(self) -> None:
         """A use inside the package's own tests does not count."""
@@ -290,10 +335,10 @@ class TestUnusedDefinitions:
         )
         assert not found
 
-    def test_passes_the_defining_file_flag_through(self) -> None:
-        """The flag reaches the per-definition check."""
+    def test_stays_quiet_about_a_helper_its_own_file_calls(self) -> None:
+        """A definition the defining file calls reaches the per-definition check."""
         sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
-        assert not unused_definitions([_definition()], sources, count_defining_file=True)
+        assert not unused_definitions([_definition()], sources)
 
     def test_no_definitions_means_no_findings(self) -> None:
         """An empty list of definitions yields no findings."""

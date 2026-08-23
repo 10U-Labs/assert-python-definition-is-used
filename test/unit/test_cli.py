@@ -79,14 +79,6 @@ class TestCreateParser:
         args = create_parser().parse_args(["lib", "--dont-search-in", "test/{package}"])
         assert args.dont_search_in == "test/{package}"
 
-    def test_count_defining_file_defaults_off(self) -> None:
-        """The defining file is discounted unless asked for."""
-        assert create_parser().parse_args(["lib"]).count_defining_file is False
-
-    def test_count_defining_file_can_be_set(self) -> None:
-        """The flag turns the looser rule on."""
-        assert create_parser().parse_args(["lib", "--count-defining-file"]).count_defining_file
-
     def test_reads_the_exclude_patterns(self) -> None:
         """The --exclude string is kept verbatim."""
         assert create_parser().parse_args(["lib", "--exclude", "*_pb2.py"]).exclude == "*_pb2.py"
@@ -572,8 +564,7 @@ class TestMain:
         """A missing search tree is an error even when definitions were read."""
         write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\nwidget()\n"})
         exit_code, _, _ = run_cli(
-            ["lib/python", "--search-in", "lib/python", "--search-in", "no/such/place",
-             "--count-defining-file"]
+            ["lib/python", "--search-in", "lib/python", "--search-in", "no/such/place"]
         )
         assert exit_code == EXIT_ERROR
 
@@ -667,15 +658,26 @@ class TestMain:
         _, stdout, _ = run_cli(["lib/python", "--exclude", "__init__.py", "--count"])
         assert stdout == "0\n"
 
-    def test_count_defining_file_credits_a_sibling_call(
+    def test_a_sibling_call_is_a_use(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """With the flag a call from elsewhere in the same file is a use."""
+        """A call from elsewhere in the same file is a use."""
         write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\n\n\nwidget()\n"})
-        _, stdout, _ = run_cli(["lib/python", "--count-defining-file", "--count"])
+        _, stdout, _ = run_cli(["lib/python", "--count"])
         assert stdout == "0\n"
+
+    def test_a_docstring_mention_is_not_a_use(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A name its own file only mentions in prose is still a finding."""
+        source = '"""Call widget()."""\n\n\ndef widget():\n    pass\n'
+        write_tree({"lib/python/pkg/__init__.py": source})
+        _, stdout, _ = run_cli(["lib/python", "--count"])
+        assert stdout == "1\n"
 
     def test_a_glob_names_the_trees(
         self,

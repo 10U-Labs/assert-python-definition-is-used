@@ -30,6 +30,14 @@ from pkg import orphan
 orphan()
 """
 
+PROSE = """\
+\"\"\"Call documented() to begin.\"\"\"
+
+
+def documented():
+    return 3
+"""
+
 PROJECT = {
     "lib/python/pkg/__init__.py": LIBRARY,
     "src/app.py": CALLER,

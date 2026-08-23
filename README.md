@@ -49,7 +49,6 @@ tests written for it, which is what a coverage gate hides.
 | --- | --- |
 | `--search-in PATH` | A tree to search for uses. Repeatable. |
 | `--dont-search-in TEMPLATE` | Template left out of the search. |
-| `--count-defining-file` | Count a use in the defining file. |
 | `--exclude PATTERNS` | Comma-separated globs to leave out of both trees. |
 | `--quiet` | Print nothing; report through the exit code. |
 | `--count` | Print only how many findings there were. |
@@ -68,22 +67,29 @@ tests written for it, which is what a coverage gate hides.
 ## What counts as a use
 
 A use is the definition's name written as a whole word in any file the
-searched trees reach. That is deliberately blunt, and it has two
-consequences worth knowing before you read the output.
+searched trees reach, apart from the file the definition lives in. That
+is deliberately blunt, and it has consequences worth knowing before you
+read the output.
 
-By default a name written elsewhere in its own defining file does not
-count. A docstring example, an `__all__` entry and a call from a
-sibling that is itself dead all look the same as a live caller, so
-crediting them hides real findings. Pass `--count-defining-file` for the
-looser rule. When the stricter rule reports a definition that a live
-sibling in the same file genuinely calls, the finding is that the
-definition is public and should not be: rename it with a leading
-underscore, which takes it out of scope.
+The file the definition lives in is read differently, because that file
+has already been parsed to find the definition in the first place. There
+a use has to be code that reads the name: a call, a decorator, a default,
+a base class, an annotation, or a parameter of that name, which is how a
+fixture is asked for. A function its own file calls is a helper doing its
+job, and reporting it would be wrong. The same word inside a docstring, a
+comment or an `__all__` entry is prose about the definition rather than a
+use of it, and crediting that would leave a dead definition unreported. A
+`def` or `class` statement binds its name without reading it, so nothing
+counts as its own use.
 
-Matching on a bare name also means a definition reads as used when any
-other file happens to contain that word, including a file that defines
-its own unrelated function of the same name. The count is a lower bound
-rather than an exact figure.
+Matching on a bare name in every other file means a definition reads as
+used when any other file happens to contain that word, including a file
+that defines its own unrelated function of the same name. The count is a
+lower bound rather than an exact figure.
+
+Two dead functions in one file that call each other still read as used,
+because those calls are real code. Finding those needs reachability from
+a live entry point, which is a different tool.
 
 Only top-level `def` and `class` statements are read. A method and a
 nested function are reached through the name of the thing that holds

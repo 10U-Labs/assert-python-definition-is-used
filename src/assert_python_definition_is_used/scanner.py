@@ -6,10 +6,6 @@ import ast
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 DEFINITION_NODES = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)
 
@@ -91,29 +87,56 @@ def _word_pattern(name: str) -> re.Pattern[str]:
     return re.compile(rf"\b{re.escape(name)}\b")
 
 
-def names_in_line(name: str, line: str) -> bool:
-    """Check whether a line names an identifier as a whole word."""
-    return _word_pattern(name).search(line) is not None
+def names_in_text(name: str, text: str) -> bool:
+    """Check whether text names an identifier as a whole word.
 
-
-def names_in_content(name: str, content: str, skipped_line: int | None = None) -> bool:
-    """Check whether content names an identifier as a whole word.
+    This is the blunt cross-file rule. Any file that writes the name, in code
+    or in prose, counts as naming it, because the alternative is resolving
+    imports across a repository that may not even be importable.
 
     Args:
         name: The identifier to look for.
-        content: The text to search.
-        skipped_line: A 1-indexed line to ignore, if any.
+        text: The text to search.
 
     Returns:
-        True if any line other than the skipped one names the identifier.
+        True if the text names the identifier as a whole word.
     """
-    if skipped_line is None:
-        return names_in_line(name, content)
-    return any(
-        names_in_line(name, line)
-        for number, line in enumerate(content.splitlines(), 1)
-        if number != skipped_line
-    )
+    return _word_pattern(name).search(text) is not None
+
+
+def _reads(node: ast.AST, name: str) -> bool:
+    """Check whether one syntax node reads an identifier."""
+    if isinstance(node, ast.Name):
+        return node.id == name and isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.arg):
+        return node.arg == name
+    return False
+
+
+def names_in_code(name: str, content: str) -> bool:
+    """Check whether a file's code reads an identifier.
+
+    This is the rule for the file a definition lives in, where the parsed
+    module is already to hand. Only a read counts: a call, a decorator, a
+    default, a base class, an annotation, or a parameter of that name, which
+    is how a fixture is asked for. The same word inside a docstring, a comment
+    or an ``__all__`` entry is prose about the definition rather than a use of
+    it, and crediting it would leave a dead definition unreported.
+
+    A ``def`` or ``class`` statement binds its name without reading it, so a
+    definition never counts as its own use and needs no line discounted.
+
+    Args:
+        name: The identifier to look for.
+        content: The file content, which must parse.
+
+    Returns:
+        True if the file's code reads the identifier.
+
+    Raises:
+        SyntaxError: If the content cannot be parsed as Python.
+    """
+    return any(_reads(node, name) for node in ast.walk(ast.parse(content)))
 
 
 def unsearched_directory(template: str | None, package: str | None) -> str | None:
@@ -136,56 +159,41 @@ def unsearched_directory(template: str | None, package: str | None) -> str | Non
     return rendered if rendered.endswith("/") else rendered + "/"
 
 
-def _searchable(
-    sources: dict[str, str],
-    definition: Definition,
-    unsearched: str | None,
-    count_defining_file: bool,
-) -> Iterator[tuple[str, int | None]]:
-    """Yield each file to search, with the line to ignore within it."""
-    for path, content in sources.items():
-        if unsearched is not None and path.startswith(unsearched):
-            continue
-        if path == definition.path:
-            if not count_defining_file:
-                continue
-            yield content, definition.line_number
-        else:
-            yield content, None
-
-
 def is_used(
     definition: Definition,
     sources: dict[str, str],
     unsearched: str | None = None,
-    count_defining_file: bool = False,
 ) -> bool:
-    """Check whether anything names a definition.
+    """Check whether anything reads a definition.
+
+    The file that holds the definition is read as code, every other file as
+    text. A definition its own file calls is a helper doing its job and is
+    used; one its own file only mentions in prose is not.
 
     Args:
         definition: The definition to look for.
         sources: Every searched file, keyed by path, mapped to its content.
         unsearched: A directory to leave out of the search, if any, however
             often its files name the definition.
-        count_defining_file: Whether a name written elsewhere in the defining
-            file counts as a use. A docstring example, an ``__all__`` entry and
-            a call from a function that is itself dead all read alike, so this
-            is off by default.
 
     Returns:
-        True if any file names the definition.
+        True if any file reads the definition.
     """
-    searchable = _searchable(sources, definition, unsearched, count_defining_file)
-    return any(
-        names_in_content(definition.name, content, skipped) for content, skipped in searchable
-    )
+    for path, content in sources.items():
+        if unsearched is not None and path.startswith(unsearched):
+            continue
+        if path == definition.path:
+            if names_in_code(definition.name, content):
+                return True
+        elif names_in_text(definition.name, content):
+            return True
+    return False
 
 
 def unused_definitions(
     definitions: list[Definition],
     sources: dict[str, str],
     unsearched_template: str | None = None,
-    count_defining_file: bool = False,
 ) -> list[Finding]:
     """Find the definitions nothing names.
 
@@ -194,8 +202,6 @@ def unused_definitions(
         sources: Every searched file, keyed by path, mapped to its content.
         unsearched_template: A path template containing ``{package}`` whose
             files are left out of the search, if any.
-        count_defining_file: Whether a name written elsewhere in the defining
-            file counts as a use.
 
     Returns:
         A finding for each definition nothing names.
@@ -203,6 +209,6 @@ def unused_definitions(
     findings = []
     for definition in definitions:
         unsearched = unsearched_directory(unsearched_template, definition.package)
-        if not is_used(definition, sources, unsearched, count_defining_file):
+        if not is_used(definition, sources, unsearched):
             findings.append(Finding(definition=definition))
     return findings

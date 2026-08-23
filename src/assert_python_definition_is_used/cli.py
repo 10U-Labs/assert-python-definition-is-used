@@ -76,16 +76,6 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--count-defining-file",
-        action="store_true",
-        help=(
-            "Count a name written elsewhere in its own defining file as a use. Off by "
-            "default, because a docstring example, an __all__ entry and a call from a "
-            "function that is itself dead all read alike."
-        ),
-    )
-
-    parser.add_argument(
         "--exclude",
         metavar="PATTERNS",
         help="Comma-separated glob patterns to exclude files, from both trees.",
@@ -399,9 +389,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     definitions = read_definitions(definition_paths, sources, result, args.verbose)
     searched = {path: content for path, content in sources.items() if path in search_paths}
 
-    findings = unused_definitions(
-        definitions, searched, args.dont_search_in, args.count_defining_file
-    )
+    findings = unused_definitions(definitions, searched, args.dont_search_in)
     result.findings = findings[:1] if (args.fail_fast and findings) else findings
 
     _report(result, args)
