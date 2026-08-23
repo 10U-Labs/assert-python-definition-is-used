@@ -65,19 +65,19 @@ class TestCreateParser:
         """More than one tree is accepted."""
         assert create_parser().parse_args(["lib", "scripts"]).trees == ["lib", "scripts"]
 
-    def test_collects_repeated_consumers(self) -> None:
-        """Every --consumer is kept, in order."""
-        args = create_parser().parse_args(["lib", "--consumer", "src", "--consumer", "test"])
-        assert args.consumers == ["src", "test"]
+    def test_collects_repeated_search_trees(self) -> None:
+        """Every --search-in is kept, in order."""
+        args = create_parser().parse_args(["lib", "--search-in", "src", "--search-in", "test"])
+        assert args.search_in == ["src", "test"]
 
-    def test_consumers_default_to_none(self) -> None:
-        """Without --consumer the list is absent rather than empty."""
-        assert create_parser().parse_args(["lib"]).consumers is None
+    def test_search_trees_default_to_none(self) -> None:
+        """Without --search-in the list is absent rather than empty."""
+        assert create_parser().parse_args(["lib"]).search_in is None
 
-    def test_reads_the_own_tests_template(self) -> None:
-        """The --own-tests template is kept verbatim."""
-        args = create_parser().parse_args(["lib", "--own-tests", "test/{package}"])
-        assert args.own_tests == "test/{package}"
+    def test_reads_the_dont_search_in_template(self) -> None:
+        """The --dont-search-in template is kept verbatim."""
+        args = create_parser().parse_args(["lib", "--dont-search-in", "test/{package}"])
+        assert args.dont_search_in == "test/{package}"
 
     def test_count_defining_file_defaults_off(self) -> None:
         """The defining file is discounted unless asked for."""
@@ -511,8 +511,8 @@ class TestMain:
         """A definition only its own tests name is reported."""
         write_tree(TREE)
         _, stdout, _ = run_cli(
-            ["lib/python", "--consumer", "lib/python", "--consumer", "src", "--consumer", "test",
-             "--own-tests", "test/lib/python/test_{package}"]
+            ["lib/python", "--search-in", "lib/python", "--search-in", "src", "--search-in", "test",
+             "--dont-search-in", "test/lib/python/test_{package}"]
         )
         assert "widget" in stdout
 
@@ -524,17 +524,17 @@ class TestMain:
         """A definition another tree names is not reported."""
         write_tree(TREE)
         _, stdout, _ = run_cli(
-            ["lib/python", "--consumer", "lib/python", "--consumer", "src", "--consumer", "test",
-             "--own-tests", "test/lib/python/test_{package}"]
+            ["lib/python", "--search-in", "lib/python", "--search-in", "src", "--search-in", "test",
+             "--dont-search-in", "test/lib/python/test_{package}"]
         )
         assert "gadget" not in stdout
 
-    def test_consumers_default_to_the_trees(
+    def test_the_search_defaults_to_the_trees(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """Without --consumer only the definition trees are searched."""
+        """Without --search-in only the definition trees are searched."""
         write_tree(TREE)
         exit_code, _, _ = run_cli(["lib/python"])
         assert exit_code == EXIT_FINDINGS
@@ -547,7 +547,7 @@ class TestMain:
         """A tree with nothing to report exits zero."""
         write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\n",
                     "src/app.py": "widget()\n"})
-        exit_code, _, _ = run_cli(["lib/python", "--consumer", "lib/python", "--consumer", "src"])
+        exit_code, _, _ = run_cli(["lib/python", "--search-in", "lib/python", "--search-in", "src"])
         assert exit_code == EXIT_SUCCESS
 
     def test_names_a_missing_tree(
@@ -564,15 +564,15 @@ class TestMain:
         exit_code, _, _ = run_cli(["no/such/place"])
         assert exit_code == EXIT_ERROR
 
-    def test_a_missing_consumer_marks_an_error(
+    def test_a_missing_search_tree_marks_an_error(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """A missing consumer tree is an error even when definitions were read."""
+        """A missing search tree is an error even when definitions were read."""
         write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\nwidget()\n"})
         exit_code, _, _ = run_cli(
-            ["lib/python", "--consumer", "lib/python", "--consumer", "no/such/place",
+            ["lib/python", "--search-in", "lib/python", "--search-in", "no/such/place",
              "--count-defining-file"]
         )
         assert exit_code == EXIT_ERROR

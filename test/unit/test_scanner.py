@@ -11,7 +11,7 @@ from assert_python_definition_is_used.scanner import (
     is_used,
     names_in_content,
     names_in_line,
-    own_tests_directory,
+    unsearched_directory,
     public_definitions,
     unused_definitions,
 )
@@ -190,26 +190,26 @@ class TestNamesInContent:
 
 
 @pytest.mark.unit
-class TestOwnTestsDirectory:
-    """Tests for own_tests_directory."""
+class TestUnsearchedDirectory:
+    """Tests for unsearched_directory."""
 
     def test_renders_the_package(self) -> None:
         """The package is substituted into the template."""
-        assert own_tests_directory("test/lib/python/test_{package}", "pkg") == (
+        assert unsearched_directory("test/lib/python/test_{package}", "pkg") == (
             "test/lib/python/test_pkg/"
         )
 
     def test_keeps_an_existing_separator(self) -> None:
         """A template already ending in a separator is not doubled."""
-        assert own_tests_directory("test/{package}/", "pkg") == "test/pkg/"
+        assert unsearched_directory("test/{package}/", "pkg") == "test/pkg/"
 
     def test_no_template_means_no_directory(self) -> None:
         """Without a template nothing is discounted."""
-        assert own_tests_directory(None, "pkg") is None
+        assert unsearched_directory(None, "pkg") is None
 
     def test_no_package_means_no_directory(self) -> None:
-        """A file belonging to no package has no own tests to discount."""
-        assert own_tests_directory("test/{package}", None) is None
+        """A file belonging to no package has no directory of its own to discount."""
+        assert unsearched_directory("test/{package}", None) is None
 
 
 @pytest.mark.unit
@@ -236,17 +236,17 @@ class TestIsUsed:
         sources = {MODULE: "def widget():\n    pass\n"}
         assert is_used(_definition(), sources, count_defining_file=True) is False
 
-    def test_own_tests_are_discounted(self) -> None:
+    def test_an_unsearched_directory_is_discounted(self) -> None:
         """A use inside the package's own tests does not count."""
         sources = {MODULE: "def widget():\n    pass\n", "test/pkg/test_it.py": "widget()\n"}
-        assert is_used(_definition(), sources, own_tests="test/pkg/") is False
+        assert is_used(_definition(), sources, unsearched="test/pkg/") is False
 
     def test_other_tests_still_count(self) -> None:
         """A use in another package's tests is a real use."""
         sources = {MODULE: "def widget():\n    pass\n", "test/other/test_it.py": "widget()\n"}
-        assert is_used(_definition(), sources, own_tests="test/pkg/") is True
+        assert is_used(_definition(), sources, unsearched="test/pkg/") is True
 
-    def test_no_consumers_means_unused(self) -> None:
+    def test_nothing_to_search_means_unused(self) -> None:
         """With nothing to search, nothing is used."""
         assert is_used(_definition(), {}) is False
 
@@ -270,8 +270,8 @@ class TestUnusedDefinitions:
         sources = {MODULE: "def widget():\n    pass\n"}
         assert unused_definitions([_definition()], sources)[0].definition == _definition()
 
-    def test_renders_own_tests_per_package(self) -> None:
-        """Each definition's own test directory comes from its own package."""
+    def test_renders_the_template_per_package(self) -> None:
+        """Each definition's discounted directory comes from its own package."""
         sources = {
             MODULE: "def widget():\n    pass\n",
             "test/lib/python/test_pkg/test_it.py": "widget()\n",

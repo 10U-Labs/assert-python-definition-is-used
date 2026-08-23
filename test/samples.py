@@ -43,16 +43,16 @@ CLEAN_PROJECT = {
 
 FULL_RUN = [
     "lib/python",
-    "--consumer",
+    "--search-in",
     "lib/python",
-    "--consumer",
+    "--search-in",
     "src",
-    "--consumer",
+    "--search-in",
     "test",
-    "--own-tests",
+    "--dont-search-in",
     "test/lib/python/test_{package}",
 ]
 
 OUTER_BOUND = FULL_RUN[:-2]
 
-CLEAN_RUN = ["lib/python", "--consumer", "lib/python", "--consumer", "src"]
+CLEAN_RUN = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]

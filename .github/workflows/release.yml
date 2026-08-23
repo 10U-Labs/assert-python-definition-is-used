@@ -18,8 +18,8 @@ jobs:
         run: >-
           assert-python-definition-is-used
           src
-          --consumer src
-          --consumer test
+          --search-in src
+          --search-in test
           --verbose
   e2e-tests:
     runs-on: ubuntu-latest

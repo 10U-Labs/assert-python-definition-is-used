@@ -63,7 +63,7 @@ class TestTheCommandAsAStepRunsIt:
         write_tree: Callable[[dict[str, str]], Path],
         run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """Without --own-tests a module its own tests exercise reads as used."""
+        """Without --dont-search-in a module its own tests exercise reads as used."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli_subprocess(OUTER_BOUND)
         assert "orphan" not in stdout
@@ -131,9 +131,9 @@ class TestTheCommandAsAStepRunsIt:
                 "-m",
                 "assert_python_definition_is_used",
                 "src",
-                "--consumer",
+                "--search-in",
                 "src",
-                "--consumer",
+                "--search-in",
                 "test",
             ],
             capture_output=True,

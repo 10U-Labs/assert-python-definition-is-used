@@ -28,12 +28,14 @@ pip install assert-python-definition-is-used
 ```bash
 # Every definition in lib/python must be named somewhere in the repo
 assert-python-definition-is-used lib/python \
-  --consumer lib/python --consumer scripts --consumer src --consumer test
+  --search-in lib/python --search-in scripts \
+  --search-in src --search-in test
 
 # The same, but a module's own tests no longer count as a caller
 assert-python-definition-is-used lib/python \
-  --consumer lib/python --consumer scripts --consumer src --consumer test \
-  --own-tests 'test/lib/python/test_{package}'
+  --search-in lib/python --search-in scripts \
+  --search-in src --search-in test \
+  --dont-search-in 'test/lib/python/test_{package}'
 ```
 
 Those two runs are the pair worth having. The first is a cheap outer
@@ -45,8 +47,8 @@ tests written for it, which is what a coverage gate hides.
 
 | Option | Effect |
 | --- | --- |
-| `--consumer PATH` | A tree to search for uses. Repeatable. |
-| `--own-tests TEMPLATE` | Template whose files are not users. |
+| `--search-in PATH` | A tree to search for uses. Repeatable. |
+| `--dont-search-in TEMPLATE` | Template left out of the search. |
 | `--count-defining-file` | Count a use in the defining file. |
 | `--exclude PATTERNS` | Comma-separated globs to leave out of both trees. |
 | `--quiet` | Print nothing; report through the exit code. |
@@ -66,7 +68,7 @@ tests written for it, which is what a coverage gate hides.
 ## What counts as a use
 
 A use is the definition's name written as a whole word in any file the
-consumer trees reach. That is deliberately blunt, and it has two
+searched trees reach. That is deliberately blunt, and it has two
 consequences worth knowing before you read the output.
 
 By default a name written elsewhere in its own defining file does not
@@ -90,22 +92,28 @@ with an underscore are skipped.
 
 ## Packages and their own tests
 
-`--own-tests` takes a path template rather than a fixed layout, because
-the convention differs between repositories. The `{package}` field is
-the first directory below the definition tree:
+The usual thing to leave out is a package's own tests, and
+`--dont-search-in` takes a path template rather than a fixed layout,
+because the convention differs between repositories. The `{package}`
+field is the first directory below the definition tree:
 
 ```text
 lib/python/aws_clients/__init__.py  ->  package is "aws_clients"
 ```
 
-So `--own-tests 'test/lib/python/test_{package}'` discounts uses under
+So `--dont-search-in 'test/lib/python/test_{package}'` leaves out
 `test/lib/python/test_aws_clients/`, and
-`--own-tests 'test/lib/python/{package}'` discounts uses under
+`--dont-search-in 'test/lib/python/{package}'` leaves out
 `test/lib/python/aws_clients/`.
 
 A file sitting directly in the definition tree belongs to no package
-and so has no test directory to discount. Uses of its definitions count
-wherever they appear.
+and so has no directory of its own to leave out. Uses of its definitions
+count wherever they appear.
+
+`--dont-search-in` is not `--exclude`. An excluded file is dropped from
+the run altogether, so its own definitions go unchecked too. A file left
+out of the search is still read for the definitions it holds; it just
+does not get a vote on whether anything else is used.
 
 ## GitHub Actions
 
@@ -113,8 +121,8 @@ wherever they appear.
 - name: Assert every definition is used outside its own tests
   uses: 10U-Labs/assert-python-definition-is-used@latest
   with:
-    consumers: lib/python scripts src test
-    own-tests: test/lib/python/test_{package}
+    dont-search-in: test/lib/python/test_{package}
+    search-in: lib/python scripts src test
     trees: lib/python
     verbose: true
 ```

@@ -54,11 +54,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--consumer",
+        "--search-in",
         action="append",
         default=None,
         metavar="PATH",
-        dest="consumers",
+        dest="search_in",
         help=(
             "A tree to search for uses, repeatable. Defaults to the definition trees, "
             "so pass it for every other place a caller may live."
@@ -66,12 +66,12 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--own-tests",
+        "--dont-search-in",
         metavar="TEMPLATE",
         help=(
-            "A path template containing {package} whose files do not count as users, "
-            "such as 'test/lib/python/test_{package}'. Without it a module held at full "
-            "coverage by its own tests always reads as used."
+            "A path template containing {package} to leave out of the search, such as "
+            "'test/lib/python/test_{package}'. Without it a module held at full coverage "
+            "by its own tests always reads as used."
         ),
     )
 
@@ -182,7 +182,7 @@ def package_of(path: str, tree: str) -> str | None:
     """Name the package a file belongs to, relative to the tree holding it.
 
     A file sitting directly in the tree belongs to no package, and so has no
-    test directory of its own to discount.
+    directory of its own to discount.
 
     Args:
         path: The file path.
@@ -378,8 +378,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     result = ScanResult()
 
     definition_paths, missing = _collect(args.trees, exclude_patterns)
-    consumer_paths, consumer_missing = _collect(args.consumers or args.trees, exclude_patterns)
-    missing.extend(consumer_missing)
+    search_paths, search_missing = _collect(args.search_in or args.trees, exclude_patterns)
+    missing.extend(search_missing)
 
     for path in missing:
         print(f"Error: Path not found: {path}", file=sys.stderr)
@@ -390,17 +390,17 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     if args.verbose:
         print(f"Reading {len(definition_paths)} definition file(s)...")
-        print(f"Searching {len(consumer_paths)} consumer file(s) for uses.")
+        print(f"Searching {len(search_paths)} file(s) for uses.")
         if exclude_patterns:
             print(f"Excluding patterns: {', '.join(exclude_patterns)}")
         print()
 
-    sources = read_sources({**consumer_paths, **definition_paths}, result, args.verbose)
+    sources = read_sources({**search_paths, **definition_paths}, result, args.verbose)
     definitions = read_definitions(definition_paths, sources, result, args.verbose)
-    consumers = {path: content for path, content in sources.items() if path in consumer_paths}
+    searched = {path: content for path, content in sources.items() if path in search_paths}
 
     findings = unused_definitions(
-        definitions, consumers, args.own_tests, args.count_defining_file
+        definitions, searched, args.dont_search_in, args.count_defining_file
     )
     result.findings = findings[:1] if (args.fail_fast and findings) else findings
 

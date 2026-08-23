@@ -30,7 +30,7 @@ class Definition:
 
 @dataclass(frozen=True)
 class Finding:
-    """A definition that nothing outside its own file and tests names."""
+    """A definition that nothing in the searched trees names."""
 
     definition: Definition
 
@@ -116,8 +116,11 @@ def names_in_content(name: str, content: str, skipped_line: int | None = None) -
     )
 
 
-def own_tests_directory(template: str | None, package: str | None) -> str | None:
-    """Render the directory holding a package's own tests.
+def unsearched_directory(template: str | None, package: str | None) -> str | None:
+    """Render the directory left out of the search for a package's definitions.
+
+    The usual case is a package's own tests, which name every definition they
+    exercise and so make a module kept alive only by them read as used.
 
     Args:
         template: A path template containing ``{package}``, or None.
@@ -136,12 +139,12 @@ def own_tests_directory(template: str | None, package: str | None) -> str | None
 def _searchable(
     sources: dict[str, str],
     definition: Definition,
-    own_tests: str | None,
+    unsearched: str | None,
     count_defining_file: bool,
 ) -> Iterator[tuple[str, int | None]]:
     """Yield each file to search, with the line to ignore within it."""
     for path, content in sources.items():
-        if own_tests is not None and path.startswith(own_tests):
+        if unsearched is not None and path.startswith(unsearched):
             continue
         if path == definition.path:
             if not count_defining_file:
@@ -154,15 +157,16 @@ def _searchable(
 def is_used(
     definition: Definition,
     sources: dict[str, str],
-    own_tests: str | None = None,
+    unsearched: str | None = None,
     count_defining_file: bool = False,
 ) -> bool:
     """Check whether anything names a definition.
 
     Args:
         definition: The definition to look for.
-        sources: Every consumer file, keyed by path, mapped to its content.
-        own_tests: A directory whose files do not count as users, if any.
+        sources: Every searched file, keyed by path, mapped to its content.
+        unsearched: A directory to leave out of the search, if any, however
+            often its files name the definition.
         count_defining_file: Whether a name written elsewhere in the defining
             file counts as a use. A docstring example, an ``__all__`` entry and
             a call from a function that is itself dead all read alike, so this
@@ -171,25 +175,25 @@ def is_used(
     Returns:
         True if any file names the definition.
     """
+    searchable = _searchable(sources, definition, unsearched, count_defining_file)
     return any(
-        names_in_content(definition.name, content, skipped)
-        for content, skipped in _searchable(sources, definition, own_tests, count_defining_file)
+        names_in_content(definition.name, content, skipped) for content, skipped in searchable
     )
 
 
 def unused_definitions(
     definitions: list[Definition],
     sources: dict[str, str],
-    own_tests_template: str | None = None,
+    unsearched_template: str | None = None,
     count_defining_file: bool = False,
 ) -> list[Finding]:
     """Find the definitions nothing names.
 
     Args:
         definitions: The definitions to check.
-        sources: Every consumer file, keyed by path, mapped to its content.
-        own_tests_template: A path template containing ``{package}`` whose
-            files do not count as users, if any.
+        sources: Every searched file, keyed by path, mapped to its content.
+        unsearched_template: A path template containing ``{package}`` whose
+            files are left out of the search, if any.
         count_defining_file: Whether a name written elsewhere in the defining
             file counts as a use.
 
@@ -198,7 +202,7 @@ def unused_definitions(
     """
     findings = []
     for definition in definitions:
-        own_tests = own_tests_directory(own_tests_template, definition.package)
-        if not is_used(definition, sources, own_tests, count_defining_file):
+        unsearched = unsearched_directory(unsearched_template, definition.package)
+        if not is_used(definition, sources, unsearched, count_defining_file):
             findings.append(Finding(definition=definition))
     return findings

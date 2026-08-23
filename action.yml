@@ -1,12 +1,12 @@
 ---
 description: Assert every public Python definition is used somewhere else
 inputs:
-  consumers:
-    description: Trees to search for uses, space-separated
-    required: false
   count-defining-file:
     default: "false"
     description: Count a name written elsewhere in its own file as a use
+    required: false
+  dont-search-in:
+    description: Template holding {package} to leave out of the search
     required: false
   exclude:
     description: Glob patterns to exclude files (comma-separated)
@@ -15,12 +15,12 @@ inputs:
     default: "false"
     description: Exit on first finding
     required: false
-  own-tests:
-    description: Template holding {package} whose files are not users
-    required: false
   quiet:
     default: "false"
     description: Suppress output, exit code only
+    required: false
+  search-in:
+    description: Trees to search for uses, space-separated
     required: false
   trees:
     description: Trees holding the definitions to check (space-separated)
@@ -49,12 +49,12 @@ runs:
         if [ -n "${{ inputs.exclude }}" ]; then
           ARGS="$ARGS --exclude '${{ inputs.exclude }}'"
         fi
-        if [ -n "${{ inputs.own-tests }}" ]; then
-          ARGS="$ARGS --own-tests '${{ inputs.own-tests }}'"
+        if [ -n "${{ inputs.dont-search-in }}" ]; then
+          ARGS="$ARGS --dont-search-in '${{ inputs.dont-search-in }}'"
         fi
         set -f
-        for consumer in ${{ inputs.consumers }}; do
-          ARGS="$ARGS --consumer '$consumer'"
+        for tree in ${{ inputs.search-in }}; do
+          ARGS="$ARGS --search-in '$tree'"
         done
         TREES=""
         for tree in ${{ inputs.trees }}; do

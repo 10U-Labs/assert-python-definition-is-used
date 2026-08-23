@@ -48,7 +48,7 @@ from assert_python_definition_is_used.scanner import (
     is_used,
     names_in_content,
     names_in_line,
-    own_tests_directory,
+    unsearched_directory,
     public_definitions,
     unused_definitions,
 )
@@ -102,7 +102,7 @@ class TestAgainstARealTree:
         _, stdout, _ = run_cli([*FULL_RUN, "--count-defining-file"])
         assert "helper" not in stdout
 
-    def test_without_own_tests_the_outer_bound_is_quiet_about_orphan(
+    def test_without_the_flag_the_outer_bound_is_quiet_about_orphan(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
@@ -160,8 +160,8 @@ class TestAgainstARealTree:
             }
         )
         _, stdout, _ = run_cli(
-            ["lib/python", "--consumer", "lib/python", "--consumer", "test",
-             "--own-tests", "test/lib/python/test_{package}"]
+            ["lib/python", "--search-in", "lib/python", "--search-in", "test",
+             "--dont-search-in", "test/lib/python/test_{package}"]
         )
         assert stdout == ""
 
@@ -178,8 +178,8 @@ class TestAgainstARealTree:
             }
         )
         _, stdout, _ = run_cli(
-            ["lib/python", "--consumer", "lib/python", "--consumer", "test",
-             "--own-tests", "test/lib/python/test_{package}"]
+            ["lib/python", "--search-in", "lib/python", "--search-in", "test",
+             "--dont-search-in", "test/lib/python/test_{package}"]
         )
         assert stdout == ""
 
@@ -205,7 +205,7 @@ class TestAgainstARealTree:
                 "src/app.py": "Kept()\n",
             }
         )
-        _, stdout, _ = run_cli(["lib/python", "--consumer", "lib/python", "--consumer", "src"])
+        _, stdout, _ = run_cli(["lib/python", "--search-in", "lib/python", "--search-in", "src"])
         assert stdout == ""
 
 
@@ -248,10 +248,10 @@ class TestOutputModes:
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """Verbose mode says how many consumer files it searched."""
+        """Verbose mode says how many files it searched."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli([*FULL_RUN, "--verbose"])
-        assert "Searching 3 consumer file(s) for uses." in stdout
+        assert "Searching 3 file(s) for uses." in stdout
 
     def test_verbose_counts_the_files(
         self,
@@ -332,15 +332,15 @@ class TestBrokenInput:
         exit_code, _, _ = run_cli(["no/such/tree"])
         assert exit_code == EXIT_ERROR
 
-    def test_a_missing_consumer_is_an_error(
+    def test_a_missing_search_tree_is_an_error(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """A consumer tree that does not exist marks the run."""
+        """A search tree that does not exist marks the run."""
         write_tree(CLEAN_PROJECT)
         exit_code, _, _ = run_cli(
-            ["lib/python", "--consumer", "src", "--consumer", "no/such/tree"]
+            ["lib/python", "--search-in", "src", "--search-in", "no/such/tree"]
         )
         assert exit_code == EXIT_ERROR
 
@@ -483,7 +483,7 @@ class TestSelectingFiles:
         _, stdout, _ = run_cli(["lib/python", "--exclude", "__init__.py", "--count"])
         assert stdout == "0\n"
 
-    def test_an_exclude_drops_a_consumer_file(
+    def test_an_exclude_drops_a_searched_file(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
@@ -742,13 +742,13 @@ class TestScannerOverRealFiles:
         """The skipped line does not count."""
         assert names_in_content("orphan", "def orphan():\n    pass\n", skipped_line=1) is False
 
-    def test_own_tests_directory_renders(self) -> None:
+    def test_unsearched_directory_renders(self) -> None:
         """The package is substituted in."""
-        assert own_tests_directory("test/{package}", "pkg") == "test/pkg/"
+        assert unsearched_directory("test/{package}", "pkg") == "test/pkg/"
 
-    def test_own_tests_directory_without_a_package(self) -> None:
+    def test_unsearched_directory_without_a_package(self) -> None:
         """No package means no directory."""
-        assert own_tests_directory("test/{package}", None) is None
+        assert unsearched_directory("test/{package}", None) is None
 
     def test_is_used_reads_the_sources(self) -> None:
         """A name in another file is a use."""
