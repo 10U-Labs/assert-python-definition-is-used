@@ -1,0 +1,66 @@
+---
+description: Assert every public Python definition in a tree is used somewhere else
+inputs:
+  consumers:
+    description: Trees to search for uses, space-separated
+    required: false
+  count-defining-file:
+    default: "false"
+    description: Count a name written elsewhere in its own defining file as a use
+    required: false
+  exclude:
+    description: Glob patterns to exclude files (comma-separated)
+    required: false
+  fail-fast:
+    default: "false"
+    description: Exit on first finding
+    required: false
+  own-tests:
+    description: Path template holding {package} whose files do not count as users
+    required: false
+  quiet:
+    default: "false"
+    description: Suppress output, exit code only
+    required: false
+  trees:
+    description: Trees holding the definitions to check (space-separated)
+    required: true
+  verbose:
+    default: "false"
+    description: Show trees read, definitions found, findings and a summary
+    required: false
+  warn-only:
+    default: "false"
+    description: Always exit 0, report only
+    required: false
+name: Assert Python Definition Is Used
+runs:
+  steps:
+    - run: python3 -m pip install assert-python-definition-is-used
+      shell: bash
+    - run: |
+        ARGS=""
+        [ "${{ inputs.quiet }}" = "true" ] && ARGS="$ARGS --quiet"
+        [ "${{ inputs.verbose }}" = "true" ] && ARGS="$ARGS --verbose"
+        [ "${{ inputs.fail-fast }}" = "true" ] && ARGS="$ARGS --fail-fast"
+        [ "${{ inputs.warn-only }}" = "true" ] && ARGS="$ARGS --warn-only"
+        [ "${{ inputs.count-defining-file }}" = "true" ] && \
+          ARGS="$ARGS --count-defining-file"
+        if [ -n "${{ inputs.exclude }}" ]; then
+          ARGS="$ARGS --exclude '${{ inputs.exclude }}'"
+        fi
+        if [ -n "${{ inputs.own-tests }}" ]; then
+          ARGS="$ARGS --own-tests '${{ inputs.own-tests }}'"
+        fi
+        set -f
+        for consumer in ${{ inputs.consumers }}; do
+          ARGS="$ARGS --consumer '$consumer'"
+        done
+        TREES=""
+        for tree in ${{ inputs.trees }}; do
+          TREES="$TREES '$tree'"
+        done
+        set +f
+        eval "assert-python-definition-is-used $ARGS $TREES"
+      shell: bash
+  using: composite

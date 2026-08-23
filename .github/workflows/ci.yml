@@ -1,0 +1,188 @@
+---
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: |
+          pip install yamllint pylint pytest mypy pytest-cov \
+            assert-no-inline-directives \
+            assert-no-linter-config-files \
+            assert-one-assert-per-pytest \
+            -e .
+          npm install -g markdownlint-cli jscpd
+      - continue-on-error: true
+        id: no_linter_configs
+        name: assert-no-linter-config-files
+        run: >-
+          assert-no-linter-config-files
+          --linters pylint,mypy,yamllint
+          --verbose
+          ${{ github.workspace }}
+      - continue-on-error: true
+        id: no_inline_directives
+        name: assert-no-inline-directives
+        run: >-
+          assert-no-inline-directives
+          --tools pylint,mypy,yamllint
+          --verbose
+          ${{ github.workspace }}/**/*
+      - continue-on-error: true
+        id: one_assert_per_pytest
+        name: assert-one-assert-per-pytest
+        run: >-
+          assert-one-assert-per-pytest
+          --verbose
+          ${{ github.workspace }}/test
+      - continue-on-error: true
+        id: definition_is_used
+        name: assert-python-definition-is-used
+        run: >-
+          assert-python-definition-is-used
+          src
+          --consumer src
+          --consumer test
+          --verbose
+      - continue-on-error: true
+        id: yamllint
+        name: yamllint
+        run: |
+          EMPTY_LINES='empty-lines: {max: 0, max-start: 0, max-end: 1}'
+          KEY_ORDERING='key-ordering: enable'
+          TRUTHY='truthy: {allowed-values: ["true", "false", "on"]}'
+          RULES="$EMPTY_LINES, $KEY_ORDERING, $TRUTHY"
+          shopt -s globstar
+          yamllint --strict --format github \
+            --config-data "{extends: default, rules: {$RULES}}" \
+            *.yml **/*.yml
+      - continue-on-error: true
+        id: markdownlint
+        name: markdownlint
+        run: markdownlint '*.md'
+      - continue-on-error: true
+        id: pylint_src
+        name: pylint (src)
+        run: python3 -m pylint src/ --fail-on=C,R,W --fail-under=10.0
+      - continue-on-error: true
+        id: pylint_test
+        name: pylint (test)
+        run: python3 -m pylint test/ --fail-on=C,R,W --fail-under=10.0
+      - continue-on-error: true
+        id: mypy_src
+        name: mypy (src)
+        run: python3 -m mypy --strict src/
+      - continue-on-error: true
+        id: mypy_test
+        name: mypy (test)
+        run: python3 -m mypy test/
+      - continue-on-error: true
+        id: jscpd_src
+        name: jscpd (src)
+        run: jscpd --pattern "**/*.py" --threshold 0 --reporters console src/
+      - continue-on-error: true
+        id: jscpd_test
+        name: jscpd (test)
+        run: jscpd --pattern "**/*.py" --threshold 0 --reporters console test/
+      - continue-on-error: true
+        id: unit_tests
+        name: Unit tests
+        run: |
+          python3 -m pytest test/unit/ \
+            --verbose --pythonwarnings=error \
+            --cov=assert_python_definition_is_used \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-fail-under=100
+      - continue-on-error: true
+        id: integration_tests
+        name: Integration tests
+        run: |
+          python3 -m pytest test/integration/ \
+            --verbose --pythonwarnings=error \
+            --cov=assert_python_definition_is_used \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-fail-under=100
+      - continue-on-error: true
+        id: e2e_tests
+        name: E2E tests
+        run: python3 -m pytest test/e2e/ --verbose --pythonwarnings=error
+      - env:
+          DEFINITION_IS_USED: ${{ steps.definition_is_used.outcome }}
+          E2E_TESTS: ${{ steps.e2e_tests.outcome }}
+          INTEGRATION_TESTS: ${{ steps.integration_tests.outcome }}
+          JSCPD_SRC: ${{ steps.jscpd_src.outcome }}
+          JSCPD_TEST: ${{ steps.jscpd_test.outcome }}
+          MARKDOWNLINT: ${{ steps.markdownlint.outcome }}
+          MYPY_SRC: ${{ steps.mypy_src.outcome }}
+          MYPY_TEST: ${{ steps.mypy_test.outcome }}
+          NO_INLINE_DIRECTIVES: ${{ steps.no_inline_directives.outcome }}
+          NO_LINTER_CONFIGS: ${{ steps.no_linter_configs.outcome }}
+          ONE_ASSERT_PER_PYTEST: ${{ steps.one_assert_per_pytest.outcome }}
+          PYLINT_SRC: ${{ steps.pylint_src.outcome }}
+          PYLINT_TEST: ${{ steps.pylint_test.outcome }}
+          UNIT_TESTS: ${{ steps.unit_tests.outcome }}
+          YAMLLINT: ${{ steps.yamllint.outcome }}
+        name: Assert no step failed
+        run: |
+          failed=""
+          [ "$YAMLLINT" = "failure" ] && failed="$failed yamllint"
+          [ "$MARKDOWNLINT" = "failure" ] && failed="$failed markdownlint"
+          [ "$PYLINT_SRC" = "failure" ] && failed="$failed pylint_src"
+          [ "$PYLINT_TEST" = "failure" ] && failed="$failed pylint_test"
+          [ "$MYPY_SRC" = "failure" ] && failed="$failed mypy_src"
+          [ "$MYPY_TEST" = "failure" ] && failed="$failed mypy_test"
+          [ "$JSCPD_SRC" = "failure" ] && failed="$failed jscpd_src"
+          [ "$JSCPD_TEST" = "failure" ] && failed="$failed jscpd_test"
+          [ "$UNIT_TESTS" = "failure" ] && failed="$failed unit_tests"
+          [ "$INTEGRATION_TESTS" = "failure" ] && \
+            failed="$failed integration_tests"
+          [ "$E2E_TESTS" = "failure" ] && failed="$failed e2e_tests"
+          [ "$NO_INLINE_DIRECTIVES" = "failure" ] && \
+            failed="$failed no_inline_directives"
+          [ "$NO_LINTER_CONFIGS" = "failure" ] && \
+            failed="$failed no_linter_configs"
+          [ "$ONE_ASSERT_PER_PYTEST" = "failure" ] && \
+            failed="$failed one_assert_per_pytest"
+          [ "$DEFINITION_IS_USED" = "failure" ] && \
+            failed="$failed definition_is_used"
+          if [ -n "$failed" ]; then
+            echo "Steps that failed:$failed"
+            exit 1
+          fi
+          echo "All steps succeeded"
+name: CI
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "*.md"
+      - ".github/workflows/ci.yml"
+      - "action.yml"
+      - "pyproject.toml"
+      - "src/**"
+      - "test/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "*.md"
+      - ".github/workflows/ci.yml"
+      - "action.yml"
+      - "pyproject.toml"
+      - "src/**"
+      - "test/**"
