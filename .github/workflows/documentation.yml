@@ -1,0 +1,32 @@
+---
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm install -g markdownlint-cli
+      - name: markdownlint
+        run: markdownlint '**/*.md'
+name: documentation
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.md"
+      - ".github/workflows/documentation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.md"
+      - ".github/workflows/documentation.yml"

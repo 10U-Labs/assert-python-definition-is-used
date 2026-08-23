@@ -79,19 +79,6 @@ jobs:
         run: npm install -g jscpd
       - name: jscpd (test)
         run: jscpd --pattern "**/*.py" --threshold 0 --reporters console test/
-  markdownlint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install dependencies
-        run: npm install -g markdownlint-cli
-      - name: markdownlint
-        run: markdownlint '*.md'
   mypy-src:
     runs-on: ubuntu-latest
     steps:
@@ -202,7 +189,6 @@ jobs:
       - integration-tests
       - jscpd-src
       - jscpd-test
-      - markdownlint
       - mypy-src
       - mypy-test
       - no-inline-directives
@@ -294,7 +280,7 @@ on:
     branches:
       - main
     paths:
-      - "*.md"
+      - ".github/workflows/documentation.yml"
       - ".github/workflows/release.yml"
       - "action.yml"
       - "pyproject.toml"
@@ -304,7 +290,7 @@ on:
     branches:
       - main
     paths:
-      - "*.md"
+      - ".github/workflows/documentation.yml"
       - ".github/workflows/release.yml"
       - "action.yml"
       - "pyproject.toml"
