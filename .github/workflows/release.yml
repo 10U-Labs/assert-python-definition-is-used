@@ -276,16 +276,6 @@ jobs:
             *.yml **/*.yml
 name: release
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/documentation.yml"
-      - ".github/workflows/release.yml"
-      - "action.yml"
-      - "pyproject.toml"
-      - "src/**"
-      - "test/**"
   push:
     branches:
       - main

@@ -18,12 +18,6 @@ jobs:
         run: markdownlint '**/*.md'
 name: documentation
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "**/*.md"
-      - ".github/workflows/documentation.yml"
   push:
     branches:
       - main
