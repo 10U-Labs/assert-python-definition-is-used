@@ -5,6 +5,15 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from test.samples import (
+    CALLER,
+    CLEAN_PROJECT,
+    CLEAN_RUN,
+    FULL_RUN,
+    LIBRARY,
+    OUTER_BOUND,
+    PROJECT,
+)
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -40,15 +49,6 @@ from assert_python_definition_is_used.scanner import (
     own_tests_directory,
     public_definitions,
     unused_definitions,
-)
-from test.samples import (
-    CALLER,
-    CLEAN_PROJECT,
-    CLEAN_RUN,
-    FULL_RUN,
-    LIBRARY,
-    OUTER_BOUND,
-    PROJECT,
 )
 
 if TYPE_CHECKING:
@@ -370,7 +370,7 @@ class TestBrokenInput:
     ) -> None:
         """A path that ends in .py but is a directory cannot be read."""
         root = write_tree({"lib/python/pkg/__init__.py": "def orphan():\n    pass\n"})
-        (root / "lib" / "python" / "pkg" / "directory.py").mkdir()
+        os.symlink("nowhere", root / "lib" / "python" / "pkg" / "broken.py")
         _, _, stderr = run_cli(["lib/python"])
         assert "Error reading" in stderr
 
@@ -381,7 +381,7 @@ class TestBrokenInput:
     ) -> None:
         """Verbose mode says an unreadable file was skipped."""
         root = write_tree({"lib/python/pkg/__init__.py": "def orphan():\n    pass\n"})
-        (root / "lib" / "python" / "pkg" / "directory.py").mkdir()
+        os.symlink("nowhere", root / "lib" / "python" / "pkg" / "broken.py")
         _, stdout, _ = run_cli(["lib/python", "--verbose"])
         assert "Skipping (unreadable)" in stdout
 
@@ -392,7 +392,7 @@ class TestBrokenInput:
     ) -> None:
         """Verbose mode ends by saying something went wrong."""
         root = write_tree({"lib/python/pkg/__init__.py": "def kept():\n    pass\nkept()\n"})
-        (root / "lib" / "python" / "pkg" / "directory.py").mkdir()
+        os.symlink("nowhere", root / "lib" / "python" / "pkg" / "broken.py")
         _, stdout, _ = run_cli(["lib/python", "--count-defining-file", "--verbose"])
         assert "Errors occurred during scanning." in stdout
 
@@ -409,7 +409,7 @@ class TestSelectingFiles:
         """A directory reaches the files below it."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "2\n"
+        assert stdout == "3\n"
 
     def test_a_file_can_be_named_directly(
         self,
@@ -419,7 +419,7 @@ class TestSelectingFiles:
         """A single file is a tree of one."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli([os.path.join("lib", "python", "pkg", "__init__.py"), "--count"])
-        assert stdout == "2\n"
+        assert stdout == "3\n"
 
     def test_a_recursive_glob_reaches_the_files(
         self,
@@ -429,7 +429,7 @@ class TestSelectingFiles:
         """A recursive pattern reaches the same files a directory does."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python/**/*.py", "--count"])
-        assert stdout == "2\n"
+        assert stdout == "3\n"
 
     def test_a_glob_matching_a_directory_is_walked(
         self,
@@ -439,7 +439,7 @@ class TestSelectingFiles:
         """A pattern matching a directory reaches the files inside it."""
         write_tree(PROJECT)
         _, stdout, _ = run_cli(["lib/python/*", "--count"])
-        assert stdout == "2\n"
+        assert stdout == "3\n"
 
     def test_a_glob_matching_nothing_is_missing(
         self,
@@ -469,7 +469,7 @@ class TestSelectingFiles:
         """A file that is not Python is not parsed."""
         write_tree({**PROJECT, "lib/python/pkg/notes.txt": "def orphan():\n"})
         _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "2\n"
+        assert stdout == "3\n"
 
     def test_an_exclude_drops_a_definition_file(
         self,
@@ -521,6 +521,14 @@ class TestHelpersOverRealFiles:
         write_tree(PROJECT)
         assert _expand("lib/python")[1] is True
 
+    def test_expand_skips_a_broken_link(
+        self, write_tree: Callable[[dict[str, str]], Path]
+    ) -> None:
+        """A pattern matching neither a file nor a directory yields nothing."""
+        root = write_tree(PROJECT)
+        os.symlink("nowhere", root / "src" / "broken.py")
+        assert _expand("src/broken.py*")[0] == []
+
     def test_expand_reports_a_missing_path(self) -> None:
         """A path that does not exist reports as unmatched."""
         assert _expand("no/such/path")[1] is False
@@ -555,9 +563,9 @@ class TestHelpersOverRealFiles:
     ) -> None:
         """A directory named like a module cannot be read."""
         root = write_tree(PROJECT)
-        (root / "directory.py").mkdir()
+        os.symlink("nowhere", root / "broken.py")
         result = ScanResult()
-        _read("directory.py", result, False)
+        _read("broken.py", result, False)
         assert result.had_error is True
 
     def test_read_definitions_skips_what_was_not_read(
@@ -565,7 +573,7 @@ class TestHelpersOverRealFiles:
     ) -> None:
         """A file missing from the sources yields no definitions."""
         write_tree(PROJECT)
-        assert read_definitions({"gone.py": "."}, {}, ScanResult()) == []
+        assert not read_definitions({"gone.py": "."}, {}, ScanResult())
 
     def test_read_definitions_finds_them(
         self, write_tree: Callable[[dict[str, str]], Path]
@@ -739,6 +747,24 @@ class TestScannerOverRealFiles:
                                 package="pkg")
         assert is_used(definition, {"lib/python/pkg/__init__.py": LIBRARY, "src/app.py": CALLER})
 
+    def test_a_finding_exposes_its_path(self) -> None:
+        """A finding reads its path from the definition it holds."""
+        definition = Definition(path="lib/python/pkg/__init__.py", line_number=5, name="orphan",
+                                package="pkg")
+        assert Finding(definition=definition).path == "lib/python/pkg/__init__.py"
+
+    def test_a_finding_exposes_its_line(self) -> None:
+        """A finding reads its line from the definition it holds."""
+        definition = Definition(path="lib/python/pkg/__init__.py", line_number=5, name="orphan",
+                                package="pkg")
+        assert Finding(definition=definition).line_number == 5
+
+    def test_a_finding_exposes_its_name(self) -> None:
+        """A finding reads its name from the definition it holds."""
+        definition = Definition(path="lib/python/pkg/__init__.py", line_number=5, name="orphan",
+                                package="pkg")
+        assert Finding(definition=definition).name == "orphan"
+
     def test_unused_definitions_reports(self) -> None:
         """A definition nothing names is reported."""
         definition = Definition(path="lib/python/pkg/__init__.py", line_number=5, name="orphan",
@@ -757,3 +783,10 @@ class TestModuleEntryPoint:
             sys.modules.pop("assert_python_definition_is_used.__main__", None)
             importlib.import_module("assert_python_definition_is_used.__main__")
             assert entry_point.called
+
+    def test_module_runs_the_cli_once(self) -> None:
+        """Importing __main__ calls into the CLI exactly once."""
+        with patch("assert_python_definition_is_used.cli.main") as entry_point:
+            sys.modules.pop("assert_python_definition_is_used.__main__", None)
+            importlib.import_module("assert_python_definition_is_used.__main__")
+            assert entry_point.call_count == 1

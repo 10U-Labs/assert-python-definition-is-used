@@ -105,7 +105,7 @@ class TestPublicDefinitions:
 
     def test_skips_a_private_definition(self) -> None:
         """A leading underscore takes a definition out of scope."""
-        assert public_definitions(MODULE, "def _widget():\n    pass\n") == []
+        assert not public_definitions(MODULE, "def _widget():\n    pass\n")
 
     def test_skips_a_method(self) -> None:
         """A method is reached through its class, so it is not counted."""
@@ -134,7 +134,7 @@ class TestPublicDefinitions:
 
     def test_empty_file_yields_nothing(self) -> None:
         """A file with no definitions yields none."""
-        assert public_definitions(MODULE, "") == []
+        assert not public_definitions(MODULE, "")
 
     def test_raises_on_unparseable_content(self) -> None:
         """Content that is not Python raises, for the caller to report."""
@@ -263,7 +263,7 @@ class TestUnusedDefinitions:
     def test_stays_quiet_about_a_used_definition(self) -> None:
         """A definition something names is not reported."""
         sources = {MODULE: "def widget():\n    pass\n", "src/app.py": "widget()\n"}
-        assert unused_definitions([_definition()], sources) == []
+        assert not unused_definitions([_definition()], sources)
 
     def test_wraps_the_definition_in_a_finding(self) -> None:
         """A finding carries the definition it was made from."""
@@ -288,13 +288,13 @@ class TestUnusedDefinitions:
         found = unused_definitions(
             [_definition(package=None)], sources, "test/lib/python/test_{package}"
         )
-        assert found == []
+        assert not found
 
     def test_passes_the_defining_file_flag_through(self) -> None:
         """The flag reaches the per-definition check."""
         sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
-        assert unused_definitions([_definition()], sources, count_defining_file=True) == []
+        assert not unused_definitions([_definition()], sources, count_defining_file=True)
 
     def test_no_definitions_means_no_findings(self) -> None:
         """An empty list of definitions yields no findings."""
-        assert unused_definitions([], {MODULE: ""}) == []
+        assert not unused_definitions([], {MODULE: ""})

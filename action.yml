@@ -1,12 +1,12 @@
 ---
-description: Assert every public Python definition in a tree is used somewhere else
+description: Assert every public Python definition is used somewhere else
 inputs:
   consumers:
     description: Trees to search for uses, space-separated
     required: false
   count-defining-file:
     default: "false"
-    description: Count a name written elsewhere in its own defining file as a use
+    description: Count a name written elsewhere in its own file as a use
     required: false
   exclude:
     description: Glob patterns to exclude files (comma-separated)
@@ -16,7 +16,7 @@ inputs:
     description: Exit on first finding
     required: false
   own-tests:
-    description: Path template holding {package} whose files do not count as users
+    description: Template holding {package} whose files are not users
     required: false
   quiet:
     default: "false"

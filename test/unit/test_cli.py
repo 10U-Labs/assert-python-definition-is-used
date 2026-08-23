@@ -20,7 +20,6 @@ from assert_python_definition_is_used.cli import (
     _walk_python_files,
     create_parser,
     determine_exit_code,
-    main,
     output_findings,
     package_of,
     parse_patterns,
@@ -272,7 +271,7 @@ class TestExpand:
     def test_expands_a_directory(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
         """A directory yields the Python files under it."""
         write_tree(TREE)
-        assert _expand("lib/python")[0] != []
+        assert _expand("lib/python")[0]
 
     def test_expands_a_file(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
         """A file yields itself."""
@@ -294,6 +293,14 @@ class TestExpand:
     def test_reports_a_missing_path(self) -> None:
         """A path naming nothing reports that it matched nothing."""
         assert _expand("no/such/place")[1] is False
+
+    def test_a_glob_matching_a_broken_link_yields_nothing(
+        self, write_tree: Callable[[dict[str, str]], Path]
+    ) -> None:
+        """A pattern matching something that is neither file nor directory yields nothing."""
+        root = write_tree(TREE)
+        os.symlink("nowhere", root / "src" / "broken.py")
+        assert _expand("src/broken.py*")[0] == []
 
     def test_reports_a_glob_matching_nothing(
         self, write_tree: Callable[[dict[str, str]], Path]
@@ -319,7 +326,7 @@ class TestCollect:
     ) -> None:
         """An excluded file is left out."""
         write_tree(TREE)
-        assert _collect(["lib/python"], ["__init__.py"])[0] == {}
+        assert not _collect(["lib/python"], ["__init__.py"])[0]
 
     def test_reports_a_missing_tree(self) -> None:
         """A tree naming nothing is reported as missing."""
@@ -338,7 +345,7 @@ class TestCollect:
     ) -> None:
         """A file that is not Python is not collected even when named."""
         write_tree({**TREE, "notes.txt": "text\n"})
-        assert _collect(["notes.txt"], [])[0] == {}
+        assert not _collect(["notes.txt"], [])[0]
 
 
 @pytest.mark.unit
@@ -377,7 +384,7 @@ class TestRead:
 
     def test_read_sources_drops_the_unreadable(self) -> None:
         """A file that cannot be read is left out rather than raising."""
-        assert read_sources({"no/such/file.py": "."}, ScanResult()) == {}
+        assert not read_sources({"no/such/file.py": "."}, ScanResult())
 
 
 @pytest.mark.unit
@@ -420,7 +427,7 @@ class TestReadDefinitions:
 
     def test_skips_a_file_that_could_not_be_read(self) -> None:
         """A file missing from the sources is passed over."""
-        assert read_definitions({"gone.py": "."}, {}, ScanResult()) == []
+        assert not read_definitions({"gone.py": "."}, {}, ScanResult())
 
     def test_records_an_error_for_unparseable_content(
         self, write_tree: Callable[[dict[str, str]], Path]

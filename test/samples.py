@@ -13,6 +13,9 @@ def orphan():
 
 def helper():
     return kept()
+
+
+DEFAULT = helper()
 """
 
 CALLER = """\

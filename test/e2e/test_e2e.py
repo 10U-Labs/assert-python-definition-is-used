@@ -5,11 +5,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from test.samples import CLEAN_PROJECT, CLEAN_RUN, FULL_RUN, OUTER_BOUND, PROJECT
 from typing import TYPE_CHECKING
 
 import pytest
-
-from test.samples import CLEAN_PROJECT, CLEAN_RUN, FULL_RUN, OUTER_BOUND, PROJECT
 
 if TYPE_CHECKING:
     from collections.abc import Callable
