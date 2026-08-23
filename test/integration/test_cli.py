@@ -780,4 +780,3 @@ class TestScannerOverRealFiles:
                                 package="pkg")
         found = unused_definitions([definition], {"lib/python/pkg/__init__.py": LIBRARY})
         assert len(found) == 1
-
