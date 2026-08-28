@@ -17,5 +17,5 @@ is that the field is absent from the response, which is a statement about
 what was checked rather than about what exists.
 
 See run-the-tool-before-writing-the-claim for the same discipline applied to
-this repository's own CLI, and disable-pull-requests-setting for what the
-GitHub response turned out to hold.
+this repository's own CLI, and commit-straight-to-main for the working
+rule that the GitHub response settled.
