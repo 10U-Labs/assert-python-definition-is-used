@@ -12,5 +12,4 @@ corrected, when a decision is made whose reasoning would not survive in the
 diff, or when the user gives guidance on how work here should be done. Lead
 with the rule, and add how it was learned only where that changes what to do
 next. Update the memory that already covers the ground rather than adding a
-second, and delete one that turns out to be wrong. Commit it with the work
-that taught it.
+second, and delete one that turns out to be wrong.
