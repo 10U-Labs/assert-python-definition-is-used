@@ -191,12 +191,12 @@ class TestAgainstATreeHoldingANote:
         _, stdout, _ = run_cli(CLEAN_RUN)
         assert "noted" in stdout
 
-    def test_leaves_the_called_definition_alone(
+    def test_leaves_the_really_called_definition_alone(
         self,
         write_tree: Callable[[dict[str, str]], Path],
         run_cli: Callable[[list[str]], tuple[int, str, str]],
     ) -> None:
-        """The definition the same file really calls is not reported."""
+        """A real call still counts in a file that also holds a note."""
         write_tree(NOTED_PROJECT)
         _, stdout, _ = run_cli(CLEAN_RUN)
         assert "called" not in stdout
