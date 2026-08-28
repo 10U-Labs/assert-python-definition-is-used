@@ -5,7 +5,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from test.samples import CLEAN_PROJECT, CLEAN_RUN, FULL_RUN, OUTER_BOUND, PROJECT
+from test.samples import (
+    CLEAN_PROJECT,
+    CLEAN_RUN,
+    FULL_RUN,
+    OUTER_BOUND,
+    PROJECT,
+    RUNTIME_ASSUMED,
+    RUNTIME_PROJECT,
+    RUNTIME_RUN,
+)
 from typing import TYPE_CHECKING
 
 import pytest
@@ -142,3 +151,58 @@ class TestTheCommandAsAStepRunsIt:
             cwd=root,
         )
         assert result.stdout == ""
+
+
+@pytest.mark.e2e
+class TestARuntimeInvokedTreeAsAStepRunsIt:
+    """The command over a tree whose definitions a runtime invokes."""
+
+    def test_the_tree_is_refused_without_the_inputs(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A pytest tree has no call sites, so the step fails today."""
+        write_tree(RUNTIME_PROJECT)
+        exit_code, _, _ = run_cli_subprocess(RUNTIME_RUN)
+        assert exit_code == 1
+
+    def test_naming_what_the_runtime_invokes_clears_the_tree(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """With both inputs set only the definition neither claims is reported."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli_subprocess(RUNTIME_ASSUMED)
+        assert stdout.splitlines() == ["test/pkg/test_pkg.py:17:spare"]
+
+    def test_the_step_still_fails_on_what_is_left(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """An ordinary dead definition in a test tree is still a failure."""
+        write_tree(RUNTIME_PROJECT)
+        exit_code, _, _ = run_cli_subprocess(RUNTIME_ASSUMED)
+        assert exit_code == 1
+
+    def test_a_tree_of_nothing_else_passes(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A test tree holding only what pytest invokes exits zero."""
+        write_tree({"test/pkg/test_pkg.py": "def test_it():\n    assert True\n"})
+        exit_code, _, _ = run_cli_subprocess([*RUNTIME_ASSUMED])
+        assert exit_code == 0
+
+    def test_the_verbose_summary_names_both_grounds(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """The step's log says how many definitions each ground took out."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli_subprocess([*RUNTIME_ASSUMED, "--verbose"])
+        assert "Assumed used by name: 2" in stdout

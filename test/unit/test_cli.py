@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from assert_python_definition_is_used.cli import (
     EXIT_SUCCESS,
     ScanResult,
     _collect,
+    assume_used,
     _expand,
     _is_glob_pattern,
     _read,
@@ -38,6 +40,22 @@ TREE = {
     "src/app.py": "from pkg import gadget\n\ngadget()\n",
     "test/lib/python/test_pkg/test_pkg.py": "from pkg import widget\n\nwidget()\n",
 }
+
+RUNTIME_TREE = {
+    "test/pkg/test_pkg.py": (
+        "import pytest\n\n\n"
+        '@pytest.fixture(name="root")\n'
+        "def root_fixture():\n    return 1\n\n\n"
+        "def test_it(root):\n    assert root\n"
+    ),
+}
+
+ASSUMED = ["--assume-used-matching", "test_*", "--assume-used-decorated-with", "pytest.fixture"]
+
+
+def _arguments(extra: list[str]) -> argparse.Namespace:
+    """Parse a run over one tree with the given extra arguments."""
+    return create_parser().parse_args(["lib/python", *extra])
 
 
 def _finding(name: str = "widget", line: int = 1) -> Finding:
@@ -78,6 +96,24 @@ class TestCreateParser:
         """The --dont-search-in template is kept verbatim."""
         args = create_parser().parse_args(["lib", "--dont-search-in", "test/{package}"])
         assert args.dont_search_in == "test/{package}"
+
+    def test_reads_the_assume_used_matching_patterns(self) -> None:
+        """The name patterns are read off the command line."""
+        parsed = create_parser().parse_args(["lib", "--assume-used-matching", "test_*"])
+        assert parsed.assume_used_matching == "test_*"
+
+    def test_assume_used_matching_defaults_to_none(self) -> None:
+        """Without the flag no name is assumed used."""
+        assert create_parser().parse_args(["lib"]).assume_used_matching is None
+
+    def test_reads_the_assume_used_decorated_with_paths(self) -> None:
+        """The decorator paths are read off the command line."""
+        parsed = create_parser().parse_args(["lib", "--assume-used-decorated-with", "app.route"])
+        assert parsed.assume_used_decorated_with == "app.route"
+
+    def test_assume_used_decorated_with_defaults_to_none(self) -> None:
+        """Without the flag no decorator is assumed used."""
+        assert create_parser().parse_args(["lib"]).assume_used_decorated_with is None
 
     def test_reads_the_exclude_patterns(self) -> None:
         """The --exclude string is kept verbatim."""
@@ -442,6 +478,50 @@ class TestReadDefinitions:
 
 
 @pytest.mark.unit
+class TestAssumeUsed:
+    """Tests for assume_used, which reads the assumptions off the arguments."""
+
+    def test_keeps_an_unclaimed_definition(self) -> None:
+        """A definition neither input names goes on to the search."""
+        held = [Definition(path="a.py", line_number=1, name="widget", package=None)]
+        assert assume_used(held, _arguments([]), ScanResult()) == held
+
+    def test_drops_a_name_match(self) -> None:
+        """A definition matching a name pattern is taken out of the search."""
+        held = [Definition(path="a.py", line_number=1, name="test_widget", package=None)]
+        assert not assume_used(held, _arguments(ASSUMED), ScanResult())
+
+    def test_counts_a_name_match(self) -> None:
+        """The count of definitions claimed by name lands on the result."""
+        held = [Definition(path="a.py", line_number=1, name="test_widget", package=None)]
+        result = ScanResult()
+        assume_used(held, _arguments(ASSUMED), result)
+        assert result.assumed_by_name == 1
+
+    def test_counts_a_decorator_match(self) -> None:
+        """The count of definitions claimed by decorator lands on the result."""
+        held = [
+            Definition(
+                path="a.py",
+                line_number=1,
+                name="root_fixture",
+                package=None,
+                decorators=("pytest.fixture",),
+            )
+        ]
+        result = ScanResult()
+        assume_used(held, _arguments(ASSUMED), result)
+        assert result.assumed_by_decorator == 1
+
+    def test_counts_nothing_without_the_inputs(self) -> None:
+        """A run passing neither input claims nothing."""
+        held = [Definition(path="a.py", line_number=1, name="test_widget", package=None)]
+        result = ScanResult()
+        assume_used(held, _arguments([]), result)
+        assert (result.assumed_by_name, result.assumed_by_decorator) == (0, 0)
+
+
+@pytest.mark.unit
 class TestOutputFindings:
     """Tests for output_findings."""
 
@@ -688,3 +768,67 @@ class TestMain:
         write_tree(TREE)
         _, stdout, _ = run_cli(["lib/python/**/*.py", "--count"])
         assert stdout == "2\n"
+
+
+@pytest.mark.unit
+class TestMainWithAssumptions:
+    """Tests for main over definitions a runtime invokes."""
+
+    def test_a_runtime_tree_fails_without_the_inputs(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Every definition pytest invokes reads as unused today."""
+        write_tree(RUNTIME_TREE)
+        exit_code, _, _ = run_cli(["test"])
+        assert exit_code == EXIT_FINDINGS
+
+    def test_a_runtime_tree_passes_with_the_inputs(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Naming what the runtime invokes clears the tree."""
+        write_tree(RUNTIME_TREE)
+        exit_code, _, _ = run_cli(["test", *ASSUMED])
+        assert exit_code == EXIT_SUCCESS
+
+    def test_the_summary_counts_the_names_claimed(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Verbose says how many a name pattern claimed."""
+        write_tree(RUNTIME_TREE)
+        _, stdout, _ = run_cli(["test", "--verbose", *ASSUMED])
+        assert "Assumed used by name: 1" in stdout
+
+    def test_the_summary_counts_the_decorators_claimed(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Verbose says how many a decorator path claimed."""
+        write_tree(RUNTIME_TREE)
+        _, stdout, _ = run_cli(["test", "--verbose", *ASSUMED])
+        assert "Assumed used by decorator: 1" in stdout
+
+    def test_the_summary_stays_quiet_when_nothing_is_claimed(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A run passing neither input prints the summary it always did."""
+        write_tree(RUNTIME_TREE)
+        _, stdout, _ = run_cli(["test", "--verbose"])
+        assert "Assumed used" not in stdout
+
+    def test_a_name_outside_the_patterns_is_reported(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A name the patterns do not match is searched for as before."""
+        write_tree({"test/pkg/helpers.py": "def spare():\n    pass\n"})
+        assert run_cli(["test", *ASSUMED])[0] == EXIT_FINDINGS

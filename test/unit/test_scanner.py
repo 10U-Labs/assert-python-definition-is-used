@@ -7,6 +7,9 @@ import pytest
 from assert_python_definition_is_used.scanner import (
     Definition,
     Finding,
+    assumed_used,
+    is_assumed_used_by_decorator,
+    is_assumed_used_by_name,
     is_public,
     is_used,
     names_in_code,
@@ -19,9 +22,16 @@ from assert_python_definition_is_used.scanner import (
 MODULE = "lib/python/pkg/__init__.py"
 
 
-def _definition(name: str = "widget", line: int = 1, package: str | None = "pkg") -> Definition:
+def _definition(
+    name: str = "widget",
+    line: int = 1,
+    package: str | None = "pkg",
+    decorators: tuple[str, ...] = (),
+) -> Definition:
     """Build a definition to hand to the functions under test."""
-    return Definition(path=MODULE, line_number=line, name=name, package=package)
+    return Definition(
+        path=MODULE, line_number=line, name=name, package=package, decorators=decorators
+    )
 
 
 @pytest.mark.unit
@@ -39,6 +49,14 @@ class TestDefinition:
     def test_is_hashable(self) -> None:
         """A definition is frozen, so it can go in a set."""
         assert len({_definition(), _definition()}) == 1
+
+    def test_carries_no_decorators_by_default(self) -> None:
+        """A definition built without decorators carries none."""
+        assert not _definition().decorators
+
+    def test_keeps_its_decorators(self) -> None:
+        """A definition remembers the decorators it was given."""
+        assert _definition(decorators=("pytest.fixture",)).decorators == ("pytest.fixture",)
 
 
 @pytest.mark.unit
@@ -143,6 +161,56 @@ class TestPublicDefinitions:
 
 
 @pytest.mark.unit
+class TestPublicDefinitionsReadingDecorators:
+    """Tests for the decorators public_definitions records."""
+
+    def test_an_undecorated_definition_carries_nothing(self) -> None:
+        """A definition with no decorator line carries no decorator."""
+        found = public_definitions(MODULE, "def widget():\n    pass\n")
+        assert found[0].decorators == ()
+
+    def test_reads_a_bare_decorator(self) -> None:
+        """A one-word decorator flattens to that word."""
+        found = public_definitions(MODULE, "@task\ndef widget():\n    pass\n")
+        assert found[0].decorators == ("task",)
+
+    def test_reads_a_dotted_decorator(self) -> None:
+        """An attribute decorator flattens to its dotted path."""
+        found = public_definitions(MODULE, "@pytest.fixture\ndef widget():\n    pass\n")
+        assert found[0].decorators == ("pytest.fixture",)
+
+    def test_reads_a_called_decorator(self) -> None:
+        """A decorator given arguments flattens the same way a bare one does."""
+        content = '@pytest.fixture(name="other")\ndef widget():\n    pass\n'
+        assert public_definitions(MODULE, content)[0].decorators == ("pytest.fixture",)
+
+    def test_reads_a_deeply_dotted_decorator(self) -> None:
+        """Every step of an attribute chain is kept."""
+        found = public_definitions(MODULE, "@app.api.route\ndef widget():\n    pass\n")
+        assert found[0].decorators == ("app.api.route",)
+
+    def test_drops_a_decorator_it_cannot_flatten(self) -> None:
+        """A decorator read out of a subscript matches nothing rather than raising."""
+        found = public_definitions(MODULE, '@registry["a"]\ndef widget():\n    pass\n')
+        assert found[0].decorators == ()
+
+    def test_drops_an_unflattenable_decorator_root(self) -> None:
+        """An attribute hanging off a subscript flattens to nothing."""
+        found = public_definitions(MODULE, '@registry["a"].wrap\ndef widget():\n    pass\n')
+        assert found[0].decorators == ()
+
+    def test_reads_every_decorator(self) -> None:
+        """A definition carrying two decorators keeps both, outermost first."""
+        content = "@one\n@two.three\ndef widget():\n    pass\n"
+        assert public_definitions(MODULE, content)[0].decorators == ("one", "two.three")
+
+    def test_reads_a_decorated_class(self) -> None:
+        """A class carries its decorators the way a function does."""
+        found = public_definitions(MODULE, "@register\nclass Widget:\n    pass\n")
+        assert found[0].decorators == ("register",)
+
+
+@pytest.mark.unit
 class TestNamesInText:
     """Tests for names_in_text."""
 
@@ -232,6 +300,112 @@ class TestNamesInCode:
         """Unparseable content raises, for the caller to report."""
         with pytest.raises(SyntaxError):
             names_in_code("widget", "def widget(:\n")
+
+
+@pytest.mark.unit
+class TestIsAssumedUsedByName:
+    """Tests for is_assumed_used_by_name."""
+
+    def test_a_glob_matches(self) -> None:
+        """A pattern the name matches claims it."""
+        assert is_assumed_used_by_name("test_widget", ["test_*"]) is True
+
+    def test_an_unmatched_name_is_not_claimed(self) -> None:
+        """A name no pattern matches is left to the search."""
+        assert is_assumed_used_by_name("widget", ["test_*"]) is False
+
+    def test_no_patterns_claim_nothing(self) -> None:
+        """The empty default claims nothing, so today's answers stand."""
+        assert is_assumed_used_by_name("test_widget", []) is False
+
+    def test_a_later_pattern_still_matches(self) -> None:
+        """Any pattern in the list is enough."""
+        assert is_assumed_used_by_name("pytest_configure", ["test_*", "pytest_*"]) is True
+
+    def test_matching_is_case_sensitive(self) -> None:
+        """Test* and test_* name different things, so case is kept."""
+        assert is_assumed_used_by_name("test_widget", ["Test*"]) is False
+
+    def test_an_exact_name_matches(self) -> None:
+        """A pattern with no wildcard is an exact name."""
+        assert is_assumed_used_by_name("lambda_handler", ["lambda_handler"]) is True
+
+
+@pytest.mark.unit
+class TestIsAssumedUsedByDecorator:
+    """Tests for is_assumed_used_by_decorator."""
+
+    def test_a_named_decorator_matches(self) -> None:
+        """A decorator the caller named claims the definition."""
+        assert is_assumed_used_by_decorator(["pytest.fixture"], ["pytest.fixture"]) is True
+
+    def test_another_decorator_is_not_claimed(self) -> None:
+        """A decorator the caller did not name claims nothing."""
+        assert is_assumed_used_by_decorator(["functools.cache"], ["pytest.fixture"]) is False
+
+    def test_no_paths_claim_nothing(self) -> None:
+        """The empty default claims nothing."""
+        assert is_assumed_used_by_decorator(["pytest.fixture"], []) is False
+
+    def test_an_undecorated_definition_is_not_claimed(self) -> None:
+        """A definition carrying no decorator matches no path."""
+        assert is_assumed_used_by_decorator([], ["pytest.fixture"]) is False
+
+    def test_one_of_several_decorators_is_enough(self) -> None:
+        """A definition matching on any decorator it carries is claimed."""
+        assert is_assumed_used_by_decorator(["cache", "app.route"], ["app.route"]) is True
+
+    def test_a_partial_path_does_not_match(self) -> None:
+        """A path is matched whole, not by its last step."""
+        assert is_assumed_used_by_decorator(["pytest.fixture"], ["fixture"]) is False
+
+
+@pytest.mark.unit
+class TestAssumedUsed:
+    """Tests for assumed_used."""
+
+    def test_an_unclaimed_definition_is_still_checked(self) -> None:
+        """A definition neither input names goes on to the search."""
+        checked, _, _ = assumed_used([_definition()], [], [])
+        assert checked == [_definition()]
+
+    def test_a_name_match_leaves_the_search(self) -> None:
+        """A definition a pattern names is not searched for."""
+        checked, _, _ = assumed_used([_definition(name="test_widget")], ["test_*"], [])
+        assert not checked
+
+    def test_a_name_match_is_counted_by_name(self) -> None:
+        """A definition a pattern names is reported under that ground."""
+        _, by_name, _ = assumed_used([_definition(name="test_widget")], ["test_*"], [])
+        assert [item.name for item in by_name] == ["test_widget"]
+
+    def test_a_decorator_match_leaves_the_search(self) -> None:
+        """A definition carrying a named decorator is not searched for."""
+        held = [_definition(decorators=("pytest.fixture",))]
+        assert not assumed_used(held, [], ["pytest.fixture"])[0]
+
+    def test_a_decorator_match_is_counted_by_decorator(self) -> None:
+        """A definition carrying a named decorator is reported under that ground."""
+        held = [_definition(name="widget_fixture", decorators=("pytest.fixture",))]
+        _, _, by_decorator = assumed_used(held, [], ["pytest.fixture"])
+        assert [item.name for item in by_decorator] == ["widget_fixture"]
+
+    def test_a_definition_matching_both_is_counted_once(self) -> None:
+        """A definition both inputs claim is counted against its name alone."""
+        held = [_definition(name="test_widget", decorators=("pytest.fixture",))]
+        _, _, by_decorator = assumed_used(held, ["test_*"], ["pytest.fixture"])
+        assert not by_decorator
+
+    def test_empty_inputs_change_nothing(self) -> None:
+        """Passing neither input leaves every definition to the search."""
+        held = [_definition(name="test_widget", decorators=("pytest.fixture",))]
+        assert assumed_used(held, [], []) == (held, [], [])
+
+    def test_keeps_source_order(self) -> None:
+        """The definitions still to check stay in the order they came in."""
+        held = [_definition(name="one"), _definition(name="test_two"), _definition(name="three")]
+        checked, _, _ = assumed_used(held, ["test_*"], [])
+        assert [item.name for item in checked] == ["one", "three"]
 
 
 @pytest.mark.unit

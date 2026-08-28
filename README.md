@@ -50,6 +50,8 @@ tests written for it, which is what a coverage gate hides.
 | `--search-in PATH` | A tree to search for uses. Repeatable. |
 | `--dont-search-in TEMPLATE` | Template left out of the search. |
 | `--exclude PATTERNS` | Comma-separated globs to leave out of both trees. |
+| `--assume-used-matching PATTERNS` | Globs of names a runtime invokes. |
+| `--assume-used-decorated-with PATHS` | Decorators a runtime invokes. |
 | `--quiet` | Print nothing; report through the exit code. |
 | `--count` | Print only how many findings there were. |
 | `--verbose` | Print the trees read, each file scanned, and a summary. |
@@ -96,6 +98,42 @@ nested function are reached through the name of the thing that holds
 them, so neither is something this tool can speak about. Names starting
 with an underscore are skipped.
 
+## Definitions a runtime invokes
+
+A use has to be written down somewhere for the search to find it, and
+some definitions are never written down. pytest finds a test by scanning
+a directory and matching a prefix, so a test function's name appears
+nowhere but its own `def` line. The same goes for a `pytest_` hook the
+plugin manager calls, for a fixture asked for under the name in its
+decorator, and for a Flask view or a Lambda handler reached from outside
+Python. Pointed at a test tree, the tool reports every test in it.
+
+Two options let you name those definitions so the tool leaves them alone.
+Both default to empty, so a run passing neither answers exactly as it did
+before.
+
+`--assume-used-matching` takes globs matched against a definition's name.
+`--assume-used-decorated-with` takes dotted paths matched against the
+decorators a definition carries, so `pytest.fixture` matches
+`@pytest.fixture` and `@pytest.fixture(name="x")` alike. A definition
+either one matches is neither searched for nor reported, and `--verbose`
+says how many each took out, so a pattern matching more than you meant is
+visible rather than silent.
+
+Neither option knows what pytest is. A repository running pytest says so
+itself:
+
+```bash
+assert-python-definition-is-used test \
+  --search-in test \
+  --assume-used-matching 'test_*,Test*,pytest_*' \
+  --assume-used-decorated-with pytest.fixture
+```
+
+One running Flask passes `--assume-used-decorated-with app.route`, one
+running Celery passes `task`, and one deploying to Lambda passes
+`--assume-used-matching lambda_handler`.
+
 ## Packages and their own tests
 
 The usual thing to leave out is a package's own tests, and
@@ -130,6 +168,19 @@ does not get a vote on whether anything else is used.
     dont-search-in: test/lib/python/test_{package}
     search-in: lib/python scripts src test
     trees: lib/python
+    verbose: true
+```
+
+Over a test tree, name what pytest invokes:
+
+```yaml
+- name: Assert every test helper is used
+  uses: 10U-Labs/assert-python-definition-is-used@latest
+  with:
+    assume-used-decorated-with: pytest.fixture
+    assume-used-matching: test_*,Test*,pytest_*
+    search-in: test
+    trees: test
     verbose: true
 ```
 

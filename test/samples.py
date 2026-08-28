@@ -38,6 +38,27 @@ def documented():
     return 3
 """
 
+RUNTIME_INVOKED = """\
+import pytest
+
+
+@pytest.fixture(name="bootstrap_dir")
+def bootstrap_dir_fixture():
+    return "/tmp"
+
+
+def pytest_configure(config):
+    return config
+
+
+def test_it_reads_the_directory(bootstrap_dir):
+    assert bootstrap_dir
+
+
+def spare():
+    return 4
+"""
+
 PROJECT = {
     "lib/python/pkg/__init__.py": LIBRARY,
     "src/app.py": CALLER,
@@ -64,3 +85,15 @@ FULL_RUN = [
 OUTER_BOUND = FULL_RUN[:-2]
 
 CLEAN_RUN = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
+
+RUNTIME_PROJECT = {"test/pkg/test_pkg.py": RUNTIME_INVOKED}
+
+RUNTIME_RUN = ["test", "--search-in", "test"]
+
+RUNTIME_ASSUMED = [
+    *RUNTIME_RUN,
+    "--assume-used-matching",
+    "test_*,pytest_*",
+    "--assume-used-decorated-with",
+    "pytest.fixture",
+]

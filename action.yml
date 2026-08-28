@@ -1,6 +1,12 @@
 ---
 description: Assert every public Python definition is used somewhere else
 inputs:
+  assume-used-decorated-with:
+    description: Dotted decorator paths a runtime invokes (comma-separated)
+    required: false
+  assume-used-matching:
+    description: Glob patterns for names a runtime invokes (comma-separated)
+    required: false
   dont-search-in:
     description: Template holding {package} to leave out of the search
     required: false
@@ -45,6 +51,14 @@ runs:
         fi
         if [ -n "${{ inputs.dont-search-in }}" ]; then
           ARGS="$ARGS --dont-search-in '${{ inputs.dont-search-in }}'"
+        fi
+        if [ -n "${{ inputs.assume-used-matching }}" ]; then
+          ARGS="$ARGS --assume-used-matching"
+          ARGS="$ARGS '${{ inputs.assume-used-matching }}'"
+        fi
+        if [ -n "${{ inputs.assume-used-decorated-with }}" ]; then
+          ARGS="$ARGS --assume-used-decorated-with"
+          ARGS="$ARGS '${{ inputs.assume-used-decorated-with }}'"
         fi
         set -f
         for tree in ${{ inputs.search-in }}; do

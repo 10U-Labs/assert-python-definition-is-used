@@ -14,6 +14,10 @@ from test.samples import (
     OUTER_BOUND,
     PROJECT,
     PROSE,
+    RUNTIME_ASSUMED,
+    RUNTIME_INVOKED,
+    RUNTIME_PROJECT,
+    RUNTIME_RUN,
 )
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -33,6 +37,7 @@ from assert_python_definition_is_used.cli import (
     EXIT_FINDINGS,
     EXIT_SUCCESS,
     ScanResult,
+    assume_used,
     create_parser,
     determine_exit_code,
     output_findings,
@@ -45,6 +50,9 @@ from assert_python_definition_is_used.cli import (
 from assert_python_definition_is_used.scanner import (
     Definition,
     Finding,
+    assumed_used,
+    is_assumed_used_by_decorator,
+    is_assumed_used_by_name,
     is_public,
     is_used,
     names_in_code,
@@ -785,3 +793,180 @@ class TestScannerOverRealFiles:
                                 package="pkg")
         found = unused_definitions([definition], {"lib/python/pkg/__init__.py": LIBRARY})
         assert len(found) == 1
+
+
+@pytest.mark.integration
+class TestAgainstARuntimeInvokedTree:
+    """The tool run over definitions a runtime invokes rather than Python."""
+
+    def test_reports_every_definition_without_the_inputs(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A pytest tree has no call sites, so today it is refused whole."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli(RUNTIME_RUN)
+        assert stdout.count("\n") == 4
+
+    def test_the_named_definitions_are_left_alone(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A definition a name pattern claims is not reported."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli(RUNTIME_ASSUMED)
+        assert "test_it_reads_the_directory" not in stdout
+
+    def test_the_hook_is_left_alone(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A plugin hook the manager calls is claimed by its prefix."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli(RUNTIME_ASSUMED)
+        assert "pytest_configure" not in stdout
+
+    def test_the_renamed_fixture_is_left_alone(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A fixture asked for under another name is claimed by its decorator."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli(RUNTIME_ASSUMED)
+        assert "bootstrap_dir_fixture" not in stdout
+
+    def test_an_ordinary_definition_is_still_reported(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A definition neither input claims is searched for as before."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli(RUNTIME_ASSUMED)
+        assert "spare" in stdout
+
+    def test_the_verbose_summary_counts_both_grounds(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Verbose says how many were claimed by name and how many by decorator."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli([*RUNTIME_ASSUMED, "--verbose"])
+        assert "Assumed used by name: 2\nAssumed used by decorator: 1\n" in stdout
+
+    def test_the_verbose_summary_is_unchanged_without_the_inputs(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A run naming nothing prints the summary it always printed."""
+        write_tree(RUNTIME_PROJECT)
+        _, stdout, _ = run_cli([*RUNTIME_RUN, "--verbose"])
+        assert "Definitions read: 4\nFindings: 4\n" in stdout
+
+
+@pytest.mark.integration
+class TestAssumptionsOverRealFiles:
+    """The assumption rules, exercised against text read from disk."""
+
+    def test_public_definitions_reads_the_decorators(
+        self, write_tree: Callable[[dict[str, str]], Path]
+    ) -> None:
+        """Parsing a real file records the decorators each definition carries."""
+        write_tree(RUNTIME_PROJECT)
+        path = os.path.join("test", "pkg", "test_pkg.py")
+        found = public_definitions(path, _read(path, ScanResult(), False) or "", "pkg")
+        assert found[0].decorators == ("pytest.fixture",)
+
+    def test_public_definitions_leaves_a_plain_definition_bare(self) -> None:
+        """A definition with no decorator line carries none."""
+        assert public_definitions("a.py", RUNTIME_INVOKED)[1].decorators == ()
+
+    def test_public_definitions_drops_an_unflattenable_decorator(self) -> None:
+        """A decorator read out of a subscript is left out rather than raising."""
+        found = public_definitions("a.py", '@table["a"]\ndef widget():\n    pass\n')
+        assert found[0].decorators == ()
+
+    def test_public_definitions_reads_a_bare_decorator(self) -> None:
+        """A one-word decorator flattens to that word."""
+        found = public_definitions("a.py", "@task\ndef widget():\n    pass\n")
+        assert found[0].decorators == ("task",)
+
+    def test_is_assumed_used_by_name_matches_a_glob(self) -> None:
+        """A pattern the name matches claims it."""
+        assert is_assumed_used_by_name("pytest_configure", ["pytest_*"]) is True
+
+    def test_is_assumed_used_by_name_leaves_the_rest(self) -> None:
+        """A name no pattern matches is left to the search."""
+        assert is_assumed_used_by_name("spare", ["pytest_*"]) is False
+
+    def test_is_assumed_used_by_decorator_matches_a_path(self) -> None:
+        """A decorator the caller named claims the definition."""
+        assert is_assumed_used_by_decorator(["pytest.fixture"], ["pytest.fixture"]) is True
+
+    def test_is_assumed_used_by_decorator_leaves_the_rest(self) -> None:
+        """A definition carrying no named decorator is left to the search."""
+        assert is_assumed_used_by_decorator([], ["pytest.fixture"]) is False
+
+    def test_assumed_used_splits_on_the_name(self) -> None:
+        """A definition a pattern names is counted against its name."""
+        held = public_definitions("a.py", RUNTIME_INVOKED)
+        _, by_name, _ = assumed_used(held, ["test_*", "pytest_*"], ["pytest.fixture"])
+        assert [item.name for item in by_name] == ["pytest_configure",
+                                                   "test_it_reads_the_directory"]
+
+    def test_assumed_used_splits_on_the_decorator(self) -> None:
+        """A definition carrying a named decorator is counted against it."""
+        held = public_definitions("a.py", RUNTIME_INVOKED)
+        _, _, by_decorator = assumed_used(held, ["test_*", "pytest_*"], ["pytest.fixture"])
+        assert [item.name for item in by_decorator] == ["bootstrap_dir_fixture"]
+
+    def test_assumed_used_keeps_the_rest(self) -> None:
+        """What neither input claims still goes to the search."""
+        held = public_definitions("a.py", RUNTIME_INVOKED)
+        checked, _, _ = assumed_used(held, ["test_*", "pytest_*"], ["pytest.fixture"])
+        assert [item.name for item in checked] == ["spare"]
+
+    def test_assumed_used_claims_nothing_by_default(self) -> None:
+        """Empty inputs leave every definition to the search."""
+        held = public_definitions("a.py", RUNTIME_INVOKED)
+        assert assumed_used(held, [], []) == (held, [], [])
+
+    def test_assume_used_counts_the_names(self) -> None:
+        """The CLI helper records how many a name pattern claimed."""
+        result = ScanResult()
+        arguments = create_parser().parse_args(RUNTIME_ASSUMED)
+        assume_used(public_definitions("a.py", RUNTIME_INVOKED), arguments, result)
+        assert result.assumed_by_name == 2
+
+    def test_assume_used_counts_the_decorators(self) -> None:
+        """The CLI helper records how many a decorator path claimed."""
+        result = ScanResult()
+        arguments = create_parser().parse_args(RUNTIME_ASSUMED)
+        assume_used(public_definitions("a.py", RUNTIME_INVOKED), arguments, result)
+        assert result.assumed_by_decorator == 1
+
+    def test_assume_used_returns_what_is_left(self) -> None:
+        """The CLI helper hands back the definitions still to search for."""
+        arguments = create_parser().parse_args(RUNTIME_ASSUMED)
+        left = assume_used(public_definitions("a.py", RUNTIME_INVOKED), arguments, ScanResult())
+        assert [item.name for item in left] == ["spare"]
+
+    def test_the_parser_reads_the_name_patterns(self) -> None:
+        """The name patterns reach the namespace."""
+        assert create_parser().parse_args(RUNTIME_ASSUMED).assume_used_matching == "test_*,pytest_*"
+
+    def test_the_parser_reads_the_decorator_paths(self) -> None:
+        """The decorator paths reach the namespace."""
+        parsed = create_parser().parse_args(RUNTIME_ASSUMED)
+        assert parsed.assume_used_decorated_with == "pytest.fixture"
+
+    def test_the_parser_defaults_both_to_none(self) -> None:
+        """A run naming neither leaves both unset."""
+        parsed = create_parser().parse_args(RUNTIME_RUN)
+        assert (parsed.assume_used_matching, parsed.assume_used_decorated_with) == (None, None)

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import ast
+import fnmatch
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 DEFINITION_NODES = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)
 
@@ -18,6 +23,7 @@ class Definition:
     line_number: int
     name: str
     package: str | None
+    decorators: tuple[str, ...] = ()
 
     def __str__(self) -> str:
         """Format as path:line:name."""
@@ -55,6 +61,29 @@ def is_public(name: str) -> bool:
     return not name.startswith("_")
 
 
+def _decorator_path(node: ast.expr) -> str | None:
+    """Flatten one decorator expression to a dotted name, or None."""
+    if isinstance(node, ast.Call):
+        return _decorator_path(node.func)
+    if isinstance(node, ast.Attribute):
+        parent = _decorator_path(node.value)
+        return None if parent is None else f"{parent}.{node.attr}"
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _decorators_of(node: ast.AsyncFunctionDef | ast.ClassDef | ast.FunctionDef) -> tuple[str, ...]:
+    """Read the dotted names of the decorators a definition carries.
+
+    A decorator that does not flatten to a dotted name, such as one read out
+    of a subscript, is left out rather than raising, so that it matches
+    nothing and the run carries on.
+    """
+    flattened = (_decorator_path(item) for item in node.decorator_list)
+    return tuple(dotted for dotted in flattened if dotted is not None)
+
+
 def public_definitions(path: str, content: str, package: str | None = None) -> list[Definition]:
     """Find every public top-level definition in a source file.
 
@@ -75,7 +104,13 @@ def public_definitions(path: str, content: str, package: str | None = None) -> l
     """
     tree = ast.parse(content, filename=path)
     return [
-        Definition(path=path, line_number=node.lineno, name=node.name, package=package)
+        Definition(
+            path=path,
+            line_number=node.lineno,
+            name=node.name,
+            package=package,
+            decorators=_decorators_of(node),
+        )
         for node in tree.body
         if isinstance(node, DEFINITION_NODES) and is_public(node.name)
     ]
@@ -137,6 +172,67 @@ def names_in_code(name: str, content: str) -> bool:
         SyntaxError: If the content cannot be parsed as Python.
     """
     return any(_reads(node, name) for node in ast.walk(ast.parse(content)))
+
+
+def is_assumed_used_by_name(name: str, patterns: Sequence[str]) -> bool:
+    """Check whether a caller's name patterns claim a definition is invoked.
+
+    Args:
+        name: The definition's name.
+        patterns: Glob patterns, matched case sensitively.
+
+    Returns:
+        True if any pattern matches the name.
+    """
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def is_assumed_used_by_decorator(decorators: Sequence[str], paths: Sequence[str]) -> bool:
+    """Check whether a caller's decorator paths claim a definition is invoked.
+
+    Args:
+        decorators: The dotted decorator names the definition carries.
+        paths: The dotted paths the caller named.
+
+    Returns:
+        True if the definition carries any of the named decorators.
+    """
+    return any(decorator in paths for decorator in decorators)
+
+
+def assumed_used(
+    definitions: list[Definition],
+    name_patterns: Sequence[str],
+    decorator_paths: Sequence[str],
+) -> tuple[list[Definition], list[Definition], list[Definition]]:
+    """Take out the definitions a caller says a runtime invokes.
+
+    A definition invoked by a runtime rather than by written Python has no
+    call site to find, so no search can answer for it. The caller names those
+    definitions instead, by the shape of their names or by the decorators they
+    carry, and what it names is neither searched for nor reported.
+
+    Args:
+        definitions: The definitions read from the trees.
+        name_patterns: Glob patterns matched against a definition's name.
+        decorator_paths: Dotted paths matched against a definition's decorators.
+
+    Returns:
+        The definitions still to check, those a name pattern claimed, and
+        those a decorator path claimed. A definition matching both is
+        counted against its name.
+    """
+    to_check: list[Definition] = []
+    by_name: list[Definition] = []
+    by_decorator: list[Definition] = []
+    for definition in definitions:
+        if is_assumed_used_by_name(definition.name, name_patterns):
+            by_name.append(definition)
+        elif is_assumed_used_by_decorator(definition.decorators, decorator_paths):
+            by_decorator.append(definition)
+        else:
+            to_check.append(definition)
+    return (to_check, by_name, by_decorator)
 
 
 def unsearched_directory(template: str | None, package: str | None) -> str | None:

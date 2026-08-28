@@ -10,7 +10,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .scanner import Definition, Finding, public_definitions, unused_definitions
+from .scanner import (
+    Definition,
+    Finding,
+    assumed_used,
+    public_definitions,
+    unused_definitions,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -28,6 +34,8 @@ class ScanResult:
 
     findings: list[Finding] = field(default_factory=list)
     definitions_read: int = 0
+    assumed_by_name: int = 0
+    assumed_by_decorator: int = 0
     files_scanned: int = 0
     had_error: bool = False
 
@@ -79,6 +87,26 @@ def create_parser() -> argparse.ArgumentParser:
         "--exclude",
         metavar="PATTERNS",
         help="Comma-separated glob patterns to exclude files, from both trees.",
+    )
+
+    parser.add_argument(
+        "--assume-used-matching",
+        metavar="PATTERNS",
+        help=(
+            "Comma-separated glob patterns matched against a definition's name. A "
+            "definition a runtime invokes has no call site to find, so name it here "
+            "instead, such as 'test_*,Test*,pytest_*'."
+        ),
+    )
+
+    parser.add_argument(
+        "--assume-used-decorated-with",
+        metavar="PATHS",
+        help=(
+            "Comma-separated dotted paths matched against the decorators a definition "
+            "carries, such as 'pytest.fixture' or 'app.route'. A bare decorator and a "
+            "called one match alike."
+        ),
     )
 
     output_group = parser.add_mutually_exclusive_group()
@@ -308,6 +336,29 @@ def read_definitions(
     return definitions
 
 
+def assume_used(
+    definitions: list[Definition], args: argparse.Namespace, result: ScanResult
+) -> list[Definition]:
+    """Drop the definitions the caller's assumptions cover, counting each ground.
+
+    Args:
+        definitions: The definitions read from the trees.
+        args: The parsed arguments, holding the two assumption inputs.
+        result: The result to record the counts on.
+
+    Returns:
+        The definitions still to search for.
+    """
+    to_check, by_name, by_decorator = assumed_used(
+        definitions,
+        parse_patterns(args.assume_used_matching),
+        parse_patterns(args.assume_used_decorated_with),
+    )
+    result.assumed_by_name = len(by_name)
+    result.assumed_by_decorator = len(by_decorator)
+    return to_check
+
+
 def output_findings(findings: list[Finding], count_mode: bool = False) -> None:
     """Print findings in the requested format.
 
@@ -347,6 +398,10 @@ def _report(result: ScanResult, args: argparse.Namespace) -> None:
         print()
         print(f"Files scanned: {result.files_scanned}")
         print(f"Definitions read: {result.definitions_read}")
+        if result.assumed_by_name:
+            print(f"Assumed used by name: {result.assumed_by_name}")
+        if result.assumed_by_decorator:
+            print(f"Assumed used by decorator: {result.assumed_by_decorator}")
         print(f"Findings: {len(result.findings)}")
         for finding in result.findings:
             print(f"  Unused: {finding}")
@@ -387,6 +442,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     sources = read_sources({**search_paths, **definition_paths}, result, args.verbose)
     definitions = read_definitions(definition_paths, sources, result, args.verbose)
+    definitions = assume_used(definitions, args, result)
     searched = {path: content for path, content in sources.items() if path in search_paths}
 
     findings = unused_definitions(definitions, searched, args.dont_search_in)
