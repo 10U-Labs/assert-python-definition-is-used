@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from test.samples import (
+    ADVERTISING_PROJECT,
     CLEAN_PROJECT,
     CLEAN_RUN,
     FULL_RUN,
@@ -225,6 +226,31 @@ class TestAgainstATreeHoldingANote:
         )
         _, stdout, _ = run_cli(CLEAN_RUN)
         assert stdout == ""
+
+
+@pytest.mark.integration
+class TestAgainstAStaleExportList:
+    """The tool run over a tree whose __all__ still advertises a dead name."""
+
+    def test_reports_the_definition_only_the_export_list_names(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """An entry advertises a definition rather than using it."""
+        write_tree(ADVERTISING_PROJECT)
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert "dropped" in stdout
+
+    def test_leaves_the_re_exported_definition_alone(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """The import beside an entry is a real use, so its name is kept."""
+        write_tree(ADVERTISING_PROJECT)
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert "shown" not in stdout
 
 
 @pytest.mark.integration

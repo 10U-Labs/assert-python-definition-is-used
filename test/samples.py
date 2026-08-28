@@ -56,6 +56,22 @@ called()
 # noted()
 """
 
+ADVERTISED = """\
+def shown():
+    return 1
+
+
+def dropped():
+    return 2
+"""
+
+REEXPORT = """\
+from pkg import shown
+
+__all__: list[str] = ["shown"]
+__all__ += ["dropped"]
+"""
+
 RUNTIME_INVOKED = """\
 import pytest
 
@@ -107,6 +123,11 @@ CLEAN_RUN = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
 NOTED_PROJECT = {
     "lib/python/pkg/__init__.py": NOTED,
     "src/app.py": NOTE,
+}
+
+ADVERTISING_PROJECT = {
+    "lib/python/pkg/__init__.py": ADVERTISED,
+    "src/api.py": REEXPORT,
 }
 
 RUNTIME_PROJECT = {"test/pkg/test_pkg.py": RUNTIME_INVOKED}
