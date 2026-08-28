@@ -54,7 +54,7 @@ tests written for it, which is what a coverage gate hides.
 | `--assume-used-decorated-with PATHS` | Decorators a runtime invokes. |
 | `--quiet` | Print nothing; report through the exit code. |
 | `--count` | Print only how many findings there were. |
-| `--verbose` | Print the trees read, each file scanned, and a summary. |
+| `--verbose` | Print each file scanned, each one read as text, and a summary. |
 | `--fail-fast` | Stop at the first finding. |
 | `--warn-only` | Always exit 0. |
 
@@ -68,25 +68,34 @@ tests written for it, which is what a coverage gate hides.
 
 ## What counts as a use
 
-A use is the definition's name written as a whole word in any file the
-searched trees reach, apart from the file the definition lives in. That
-is deliberately blunt, and it has consequences worth knowing before you
-read the output.
+Every file these trees reach is a Python file, so every one of them is
+read as code rather than as text. A use is the definition's name read by
+a file's syntax tree: a call, a decorator, a default, a base class, an
+annotation, an attribute, an import, or a parameter of that name, which
+is how a fixture is asked for. A name written in a string constant is a
+use too, because that is how a name crosses a file boundary as data, the
+way a Django route reaches a view.
 
-The file the definition lives in is read differently, because that file
-has already been parsed to find the definition in the first place. There
-a use has to be code that reads the name: a call, a decorator, a default,
-a base class, an annotation, or a parameter of that name, which is how a
-fixture is asked for. A function its own file calls is a helper doing its
-job, and reporting it would be wrong. The same word inside a docstring, a
-comment or an `__all__` entry is prose about the definition rather than a
-use of it, and crediting that would leave a dead definition unreported. A
-`def` or `class` statement binds its name without reading it, so nothing
-counts as its own use.
+A comment is not a use. The parser discards it, so a note saying a call
+was removed cannot keep alive the definition it names. A docstring and an
+`__all__` entry are not uses either: both are prose about a definition
+rather than a use of it, and crediting them would leave a dead definition
+unreported. A re-export still reads as used, because the `__all__` entry
+naming a definition comes with the import that brings it in, and an
+import is a read. A `def` or `class` statement binds its name without
+reading it, so nothing counts as its own use.
 
-Matching on a bare name in every other file means a definition reads as
-used when any other file happens to contain that word, including a file
-that defines its own unrelated function of the same name. The count is a
+The file a definition lives in is read no differently from any other. A
+function its own file calls is a helper doing its job, and reporting it
+would be wrong; one its own file only writes about is not used by it.
+
+A file that will not parse falls back to a whole-word search over its raw
+text, where a name written anywhere, in code or in prose, counts. A
+repository holding a file Python cannot read keeps the blunt rule on that
+file rather than failing, and `--verbose` names each file that fell back.
+
+Reading a name is still not resolving it. A file that calls its own
+unrelated function of the same name counts as a use, so the count is a
 lower bound rather than an exact figure.
 
 Two dead functions in one file that call each other still read as used,

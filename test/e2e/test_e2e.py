@@ -9,6 +9,7 @@ from test.samples import (
     CLEAN_PROJECT,
     CLEAN_RUN,
     FULL_RUN,
+    NOTED_PROJECT,
     OUTER_BOUND,
     PROJECT,
     RUNTIME_ASSUMED,
@@ -151,6 +152,31 @@ class TestTheCommandAsAStepRunsIt:
             cwd=root,
         )
         assert result.stdout == ""
+
+
+@pytest.mark.e2e
+class TestANoteAsAStepRunsIt:
+    """The command over a tree where a note is all that names a definition."""
+
+    def test_reports_the_definition_the_note_is_about(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A definition a comment alone keeps alive is reported."""
+        write_tree(NOTED_PROJECT)
+        _, stdout, _ = run_cli_subprocess(CLEAN_RUN)
+        assert "noted" in stdout
+
+    def test_the_note_fails_the_step(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """The finding exits non-zero, which is what fails a job."""
+        write_tree(NOTED_PROJECT)
+        exit_code, _, _ = run_cli_subprocess(CLEAN_RUN)
+        assert exit_code == 1
 
 
 @pytest.mark.e2e

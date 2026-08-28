@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import runpy
 import sys
@@ -11,6 +12,7 @@ from test.samples import (
     CLEAN_RUN,
     FULL_RUN,
     LIBRARY,
+    NOTED_PROJECT,
     OUTER_BOUND,
     PROJECT,
     PROSE,
@@ -55,8 +57,9 @@ from assert_python_definition_is_used.scanner import (
     is_assumed_used_by_name,
     is_public,
     is_used,
-    names_in_code,
     names_in_text,
+    names_used,
+    read_searched,
     unsearched_directory,
     public_definitions,
     unused_definitions,
@@ -219,6 +222,56 @@ class TestAgainstARealTree:
 
 
 @pytest.mark.integration
+class TestAgainstATreeHoldingANote:
+    """The tool run over a tree where a note is all that names a definition."""
+
+    def test_reports_the_definition_the_note_is_about(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """The comment that explains a removal no longer hides the removal."""
+        write_tree(NOTED_PROJECT)
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert "noted" in stdout
+
+    def test_leaves_the_called_definition_alone(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """The definition the same file really calls is not reported."""
+        write_tree(NOTED_PROJECT)
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert "called" not in stdout
+
+    def test_reports_only_what_is_dead(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """One finding, for the definition whose only call was commented out."""
+        write_tree(NOTED_PROJECT)
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert stdout.splitlines() == ["lib/python/pkg/__init__.py:5:noted"]
+
+    def test_a_name_written_as_data_is_still_a_use(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A route naming a view in a string reaches it, so the view is used."""
+        write_tree(
+            {
+                "lib/python/pkg/__init__.py": "def handle_login():\n    return 1\n",
+                "src/app.py": 'urlpatterns = ["views.handle_login"]\n',
+            }
+        )
+        _, stdout, _ = run_cli(CLEAN_RUN)
+        assert stdout == ""
+
+
+@pytest.mark.integration
 class TestOutputModes:
     """The output the CLI produces over a real tree."""
 
@@ -373,6 +426,38 @@ class TestBrokenInput:
                     "lib/python/pkg/good.py": "def orphan():\n    pass\n"})
         _, stdout, _ = run_cli(["lib/python"])
         assert "orphan" in stdout
+
+    def test_an_unparseable_search_file_falls_back_to_text(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """A file the parser cannot read is searched as text, prose and all."""
+        write_tree(
+            {
+                "lib/python/pkg/__init__.py": "def orphan():\n    pass\n",
+                "src/bad.py": "# orphan was called here\ndef broken(:\n",
+            }
+        )
+        _, stdout, _ = run_cli(["lib/python", "--search-in", "lib/python", "--search-in", "src"])
+        assert stdout == ""
+
+    def test_an_unparseable_search_file_is_named_verbosely(
+        self,
+        write_tree: Callable[[dict[str, str]], Path],
+        run_cli: Callable[[list[str]], tuple[int, str, str]],
+    ) -> None:
+        """Verbose mode names the file running the blunt rule, so it is visible."""
+        write_tree(
+            {
+                "lib/python/pkg/__init__.py": "def orphan():\n    pass\n",
+                "src/bad.py": "def broken(:\n",
+            }
+        )
+        _, stdout, _ = run_cli(
+            ["lib/python", "--search-in", "lib/python", "--search-in", "src", "--verbose"]
+        )
+        assert "Searching as text (will not parse): src/bad.py" in stdout
 
     def test_an_unreadable_file_is_named(
         self,
@@ -747,13 +832,13 @@ class TestScannerOverRealFiles:
         """Any line naming it is enough."""
         assert names_in_text("kept", CALLER) is True
 
-    def test_names_in_code_reads_a_call(self) -> None:
+    def test_names_used_reads_a_call(self) -> None:
         """A call in the file's code is a use."""
-        assert names_in_code("kept", LIBRARY) is True
+        assert "kept" in names_used(ast.parse(LIBRARY))
 
-    def test_names_in_code_ignores_a_definition(self) -> None:
+    def test_names_used_ignores_a_definition(self) -> None:
         """A def binds its name without reading it."""
-        assert names_in_code("orphan", "def orphan():\n    pass\n") is False
+        assert "orphan" not in names_used(ast.parse("def orphan():\n    pass\n"))
 
     def test_unsearched_directory_renders(self) -> None:
         """The package is substituted in."""
@@ -767,7 +852,8 @@ class TestScannerOverRealFiles:
         """A name in another file is a use."""
         definition = Definition(path="lib/python/pkg/__init__.py", line_number=1, name="kept",
                                 package="pkg")
-        assert is_used(definition, {"lib/python/pkg/__init__.py": LIBRARY, "src/app.py": CALLER})
+        searched = read_searched({"lib/python/pkg/__init__.py": LIBRARY, "src/app.py": CALLER})
+        assert is_used(definition, searched)
 
     def test_a_finding_exposes_its_path(self) -> None:
         """A finding reads its path from the definition it holds."""
@@ -791,7 +877,9 @@ class TestScannerOverRealFiles:
         """A definition nothing names is reported."""
         definition = Definition(path="lib/python/pkg/__init__.py", line_number=5, name="orphan",
                                 package="pkg")
-        found = unused_definitions([definition], {"lib/python/pkg/__init__.py": LIBRARY})
+        found = unused_definitions(
+            [definition], read_searched({"lib/python/pkg/__init__.py": LIBRARY})
+        )
         assert len(found) == 1
 
 

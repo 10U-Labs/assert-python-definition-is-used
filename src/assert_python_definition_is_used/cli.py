@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING
 from .scanner import (
     Definition,
     Finding,
+    Searched,
     assumed_used,
     public_definitions,
+    read_searched,
     unused_definitions,
 )
 
@@ -336,6 +338,16 @@ def read_definitions(
     return definitions
 
 
+def report_unparsed(searched: Searched) -> None:
+    """Name each searched file that fell back to the whole-word text rule.
+
+    Args:
+        searched: The searched files, read as code where they parse.
+    """
+    for path in searched.unparsed:
+        print(f"Searching as text (will not parse): {path}")
+
+
 def assume_used(
     definitions: list[Definition], args: argparse.Namespace, result: ScanResult
 ) -> list[Definition]:
@@ -443,7 +455,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     sources = read_sources({**search_paths, **definition_paths}, result, args.verbose)
     definitions = read_definitions(definition_paths, sources, result, args.verbose)
     definitions = assume_used(definitions, args, result)
-    searched = {path: content for path, content in sources.items() if path in search_paths}
+    to_search = {path: content for path, content in sources.items() if path in search_paths}
+    searched = read_searched(to_search)
+    if args.verbose:
+        report_unparsed(searched)
 
     findings = unused_definitions(definitions, searched, args.dont_search_in)
     result.findings = findings[:1] if (args.fail_fast and findings) else findings

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 
 from assert_python_definition_is_used.scanner import (
@@ -12,14 +14,20 @@ from assert_python_definition_is_used.scanner import (
     is_assumed_used_by_name,
     is_public,
     is_used,
-    names_in_code,
     names_in_text,
+    names_used,
+    read_searched,
     unsearched_directory,
     public_definitions,
     unused_definitions,
 )
 
 MODULE = "lib/python/pkg/__init__.py"
+
+
+def _uses(name: str, content: str) -> bool:
+    """Ask whether a file's code uses a name, parsing it the way the tool does."""
+    return name in names_used(ast.parse(content))
 
 
 def _definition(
@@ -243,63 +251,123 @@ class TestNamesInText:
         assert names_in_text("widget", "import x\n") is False
 
     def test_counts_a_name_written_in_prose(self) -> None:
-        """The cross-file rule is blunt and credits a docstring too."""
+        """The fallback rule is blunt and credits a docstring too."""
         assert names_in_text("widget", '"""Call widget() to begin."""\n') is True
 
 
 @pytest.mark.unit
-class TestNamesInCode:
-    """Tests for names_in_code."""
+class TestNamesUsed:
+    """Tests for names_used, the rule every parseable file is read by."""
 
     def test_finds_a_call(self) -> None:
         """A call reads the name."""
-        assert names_in_code("widget", "widget()\n") is True
+        assert _uses("widget", "widget()\n") is True
 
     def test_finds_a_call_from_a_sibling(self) -> None:
         """A helper its own file calls is read."""
         content = "def widget():\n    pass\n\n\ndef entry():\n    return widget()\n"
-        assert names_in_code("widget", content) is True
+        assert _uses("widget", content) is True
 
     def test_finds_a_decorator(self) -> None:
         """A decorator reads the name."""
-        assert names_in_code("widget", "@widget\ndef wrapped():\n    pass\n") is True
+        assert _uses("widget", "@widget\ndef wrapped():\n    pass\n") is True
+
+    def test_finds_a_default(self) -> None:
+        """A default reads the name."""
+        assert _uses("widget", "def wrapped(maker=widget):\n    pass\n") is True
 
     def test_finds_a_base_class(self) -> None:
         """A base class reads the name."""
-        assert names_in_code("widget", "class Sub(widget):\n    pass\n") is True
+        assert _uses("widget", "class Sub(widget):\n    pass\n") is True
 
     def test_finds_an_annotation(self) -> None:
         """An annotation reads the name."""
-        assert names_in_code("widget", "value: widget = None\n") is True
+        assert _uses("widget", "value: widget = None\n") is True
 
     def test_finds_a_parameter_of_that_name(self) -> None:
         """A parameter is how a fixture is asked for, so it reads the name."""
-        assert names_in_code("widget", "def test_it(widget):\n    pass\n") is True
+        assert _uses("widget", "def test_it(widget):\n    pass\n") is True
+
+    def test_finds_an_attribute(self) -> None:
+        """A call through the module that holds it reads the name."""
+        assert _uses("widget", "import pkg\n\npkg.widget()\n") is True
+
+    def test_finds_an_import(self) -> None:
+        """An import brings the name in, which is a read."""
+        assert _uses("widget", "from pkg import widget\n") is True
+
+    def test_finds_a_renamed_import(self) -> None:
+        """An import under another name still reads the name it imports."""
+        assert _uses("widget", "from pkg import widget as gadget\n") is True
+
+    def test_finds_a_string_constant(self) -> None:
+        """A name written as data crosses a file boundary, as a route does."""
+        assert _uses("widget", 'urls = ["views.widget"]\n') is True
 
     def test_ignores_a_definition_of_the_name(self) -> None:
         """A def binds its name without reading it."""
-        assert names_in_code("widget", "def widget():\n    pass\n") is False
+        assert _uses("widget", "def widget():\n    pass\n") is False
+
+    def test_ignores_a_comment(self) -> None:
+        """The parser discards a comment, so a note about a name is not a use."""
+        assert _uses("widget", "# we used to call widget here\n") is False
 
     def test_ignores_a_docstring_mention(self) -> None:
         """Prose about a definition is not a use of it."""
-        assert names_in_code("widget", '"""Call widget() to begin."""\n') is False
+        assert _uses("widget", '"""Call widget() to begin."""\n') is False
+
+    def test_ignores_a_docstring_inside_a_function(self) -> None:
+        """A docstring is prose wherever it sits, not only at the top of a file."""
+        assert _uses("widget", 'def entry():\n    """Call widget()."""\n') is False
 
     def test_ignores_an_all_entry(self) -> None:
         """An __all__ entry advertises a name rather than reading it."""
-        assert names_in_code("widget", '__all__ = ["widget"]\n') is False
+        assert _uses("widget", '__all__ = ["widget"]\n') is False
+
+    def test_ignores_an_extended_all_entry(self) -> None:
+        """An __all__ added to is still an __all__."""
+        assert _uses("widget", '__all__ = []\n__all__ += ["widget"]\n') is False
+
+    def test_a_re_export_still_counts(self) -> None:
+        """An __all__ entry comes with the import that brings the name in."""
+        content = 'from .impl import widget\n\n__all__ = ["widget"]\n'
+        assert _uses("widget", content) is True
 
     def test_ignores_a_rebinding(self) -> None:
         """Assigning to the name overwrites it rather than reading it."""
-        assert names_in_code("widget", "widget = 3\n") is False
+        assert _uses("widget", "widget = 3\n") is False
 
     def test_ignores_an_unrelated_name(self) -> None:
         """Code that never reads the identifier reports false."""
-        assert names_in_code("widget", "other()\n") is False
+        assert _uses("widget", "other()\n") is False
 
-    def test_content_that_will_not_parse_raises(self) -> None:
-        """Unparseable content raises, for the caller to report."""
-        with pytest.raises(SyntaxError):
-            names_in_code("widget", "def widget(:\n")
+
+@pytest.mark.unit
+class TestReadSearched:
+    """Tests for read_searched."""
+
+    def test_reads_a_file_as_code(self) -> None:
+        """A file that parses is reduced to the names it uses."""
+        searched = read_searched({"src/app.py": "widget()\n"})
+        assert searched.uses == {"src/app.py": frozenset({"widget"})}
+
+    def test_a_file_that_parses_is_not_kept_as_text(self) -> None:
+        """A file read as code has no text left to fall back to."""
+        assert not read_searched({"src/app.py": "widget()\n"}).unparsed
+
+    def test_keeps_the_text_of_a_file_that_will_not_parse(self) -> None:
+        """A file Python cannot read keeps its raw text for the blunt rule."""
+        searched = read_searched({"src/bad.py": "def widget(:\n"})
+        assert searched.unparsed == {"src/bad.py": "def widget(:\n"}
+
+    def test_a_file_that_will_not_parse_has_no_uses(self) -> None:
+        """A file that will not parse contributes no names."""
+        assert not read_searched({"src/bad.py": "def widget(:\n"}).uses
+
+    def test_reads_the_files_in_path_order(self) -> None:
+        """Files are read in path order, so a report of them is stable."""
+        searched = read_searched({"src/b.py": "", "src/a.py": ""})
+        assert list(searched.uses) == ["src/a.py", "src/b.py"]
 
 
 @pytest.mark.unit
@@ -436,38 +504,59 @@ class TestIsUsed:
     """Tests for is_used."""
 
     def test_a_sibling_module_counts(self) -> None:
-        """A name written in another file is a use."""
+        """A name another file's code reads is a use."""
         sources = {MODULE: "def widget():\n    pass\n", "src/app.py": "widget()\n"}
-        assert is_used(_definition(), sources) is True
+        assert is_used(_definition(), read_searched(sources)) is True
 
     def test_the_defining_file_counts_as_code(self) -> None:
         """A call from the defining file is a use, because a helper is used."""
         sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
-        assert is_used(_definition(), sources) is True
+        assert is_used(_definition(), read_searched(sources)) is True
 
     def test_the_defining_file_does_not_count_as_prose(self) -> None:
         """A docstring in the defining file mentions the name without using it."""
         sources = {MODULE: '"""Call widget()."""\n\n\ndef widget():\n    pass\n'}
-        assert is_used(_definition(), sources) is False
+        assert is_used(_definition(), read_searched(sources)) is False
+
+    def test_a_sibling_module_does_not_count_as_prose(self) -> None:
+        """A comment left where a call used to be is not a use either."""
+        sources = {
+            MODULE: "def widget():\n    pass\n",
+            "src/app.py": "# we used to call widget here\n",
+        }
+        assert is_used(_definition(), read_searched(sources)) is False
 
     def test_the_definition_never_counts_as_its_own_use(self) -> None:
         """A file holding nothing but the definition does not use it."""
         sources = {MODULE: "def widget():\n    pass\n"}
-        assert is_used(_definition(), sources) is False
+        assert is_used(_definition(), read_searched(sources)) is False
+
+    def test_a_file_that_will_not_parse_falls_back_to_text(self) -> None:
+        """A file Python cannot read is searched as text, prose and all."""
+        sources = {
+            MODULE: "def widget():\n    pass\n",
+            "src/bad.py": "# widget was called here\ndef broken(:\n",
+        }
+        assert is_used(_definition(), read_searched(sources)) is True
 
     def test_an_unsearched_directory_is_discounted(self) -> None:
         """A use inside the package's own tests does not count."""
         sources = {MODULE: "def widget():\n    pass\n", "test/pkg/test_it.py": "widget()\n"}
-        assert is_used(_definition(), sources, unsearched="test/pkg/") is False
+        assert is_used(_definition(), read_searched(sources), unsearched="test/pkg/") is False
+
+    def test_an_unsearched_directory_is_discounted_when_it_will_not_parse(self) -> None:
+        """A file left out of the search is left out however it is read."""
+        sources = {MODULE: "def widget():\n    pass\n", "test/pkg/test_it.py": "widget(:\n"}
+        assert is_used(_definition(), read_searched(sources), unsearched="test/pkg/") is False
 
     def test_other_tests_still_count(self) -> None:
         """A use in another package's tests is a real use."""
         sources = {MODULE: "def widget():\n    pass\n", "test/other/test_it.py": "widget()\n"}
-        assert is_used(_definition(), sources, unsearched="test/pkg/") is True
+        assert is_used(_definition(), read_searched(sources), unsearched="test/pkg/") is True
 
     def test_nothing_to_search_means_unused(self) -> None:
         """With nothing to search, nothing is used."""
-        assert is_used(_definition(), {}) is False
+        assert is_used(_definition(), read_searched({})) is False
 
 
 @pytest.mark.unit
@@ -477,17 +566,26 @@ class TestUnusedDefinitions:
     def test_reports_an_unused_definition(self) -> None:
         """A definition nothing names is reported."""
         sources = {MODULE: "def widget():\n    pass\n"}
-        assert len(unused_definitions([_definition()], sources)) == 1
+        assert len(unused_definitions([_definition()], read_searched(sources))) == 1
 
     def test_stays_quiet_about_a_used_definition(self) -> None:
         """A definition something names is not reported."""
         sources = {MODULE: "def widget():\n    pass\n", "src/app.py": "widget()\n"}
-        assert not unused_definitions([_definition()], sources)
+        assert not unused_definitions([_definition()], read_searched(sources))
+
+    def test_reports_a_definition_kept_alive_only_by_a_comment(self) -> None:
+        """A note about a deleted call site no longer hides the dead definition."""
+        sources = {
+            MODULE: "def widget():\n    pass\n",
+            "src/app.py": "# we used to call widget here, removed it last year\n",
+        }
+        assert len(unused_definitions([_definition()], read_searched(sources))) == 1
 
     def test_wraps_the_definition_in_a_finding(self) -> None:
         """A finding carries the definition it was made from."""
         sources = {MODULE: "def widget():\n    pass\n"}
-        assert unused_definitions([_definition()], sources)[0].definition == _definition()
+        found = unused_definitions([_definition()], read_searched(sources))
+        assert found[0].definition == _definition()
 
     def test_renders_the_template_per_package(self) -> None:
         """Each definition's discounted directory comes from its own package."""
@@ -495,7 +593,9 @@ class TestUnusedDefinitions:
             MODULE: "def widget():\n    pass\n",
             "test/lib/python/test_pkg/test_it.py": "widget()\n",
         }
-        found = unused_definitions([_definition()], sources, "test/lib/python/test_{package}")
+        found = unused_definitions(
+            [_definition()], read_searched(sources), "test/lib/python/test_{package}"
+        )
         assert len(found) == 1
 
     def test_a_definition_with_no_package_keeps_its_tests(self) -> None:
@@ -505,15 +605,15 @@ class TestUnusedDefinitions:
             "test/lib/python/test_pkg/test_it.py": "widget()\n",
         }
         found = unused_definitions(
-            [_definition(package=None)], sources, "test/lib/python/test_{package}"
+            [_definition(package=None)], read_searched(sources), "test/lib/python/test_{package}"
         )
         assert not found
 
     def test_stays_quiet_about_a_helper_its_own_file_calls(self) -> None:
         """A definition the defining file calls reaches the per-definition check."""
         sources = {MODULE: "def widget():\n    pass\nwidget()\n"}
-        assert not unused_definitions([_definition()], sources)
+        assert not unused_definitions([_definition()], read_searched(sources))
 
     def test_no_definitions_means_no_findings(self) -> None:
         """An empty list of definitions yields no findings."""
-        assert not unused_definitions([], {MODULE: ""})
+        assert not unused_definitions([], read_searched({MODULE: ""}))

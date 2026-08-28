@@ -13,6 +13,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 DEFINITION_NODES = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)
+DOCSTRING_HOLDERS = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Module)
+
+DocstringHolder = ast.AsyncFunctionDef | ast.ClassDef | ast.FunctionDef | ast.Module
+
+WORDS = re.compile(r"\w+")
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,14 @@ class Finding:
     def __str__(self) -> str:
         """Format as path:line:name."""
         return str(self.definition)
+
+
+@dataclass(frozen=True)
+class Searched:
+    """Every searched file, read as code where it parses."""
+
+    uses: dict[str, frozenset[str]]
+    unparsed: dict[str, str]
 
 
 def is_public(name: str) -> bool:
@@ -125,9 +138,10 @@ def _word_pattern(name: str) -> re.Pattern[str]:
 def names_in_text(name: str, text: str) -> bool:
     """Check whether text names an identifier as a whole word.
 
-    This is the blunt cross-file rule. Any file that writes the name, in code
-    or in prose, counts as naming it, because the alternative is resolving
-    imports across a repository that may not even be importable.
+    This is the fallback for a file that will not parse, where there is no
+    syntax tree to ask. Any file that writes the name, in code or in prose,
+    counts as naming it, so a repository holding a file Python cannot read
+    keeps the blunt rule on that file rather than failing.
 
     Args:
         name: The identifier to look for.
@@ -139,39 +153,134 @@ def names_in_text(name: str, text: str) -> bool:
     return _word_pattern(name).search(text) is not None
 
 
-def _reads(node: ast.AST, name: str) -> bool:
-    """Check whether one syntax node reads an identifier."""
+def _names_read(node: ast.AST) -> tuple[str, ...]:
+    """Read the names one syntax node reads."""
     if isinstance(node, ast.Name):
-        return node.id == name and isinstance(node.ctx, ast.Load)
+        return (node.id,) if isinstance(node.ctx, ast.Load) else ()
+    if isinstance(node, ast.Attribute):
+        return (node.attr,)
+    if isinstance(node, ast.alias):
+        imported = node.name.split(".")
+        return (*imported, node.asname) if node.asname else tuple(imported)
     if isinstance(node, ast.arg):
-        return node.arg == name
-    return False
+        return (node.arg,)
+    return ()
 
 
-def names_in_code(name: str, content: str) -> bool:
-    """Check whether a file's code reads an identifier.
+def _string_value(node: ast.AST) -> str | None:
+    """Read the text of one string constant, or None if the node is not one."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
-    This is the rule for the file a definition lives in, where the parsed
-    module is already to hand. Only a read counts: a call, a decorator, a
-    default, a base class, an annotation, or a parameter of that name, which
-    is how a fixture is asked for. The same word inside a docstring, a comment
-    or an ``__all__`` entry is prose about the definition rather than a use of
-    it, and crediting it would leave a dead definition unreported.
 
-    A ``def`` or ``class`` statement binds its name without reading it, so a
-    definition never counts as its own use and needs no line discounted.
+def _docstring_of(node: DocstringHolder) -> ast.expr | None:
+    """Read the docstring of a module, class or function, if it has one."""
+    first = node.body[0] if node.body else None
+    if isinstance(first, ast.Expr) and _string_value(first.value) is not None:
+        return first.value
+    return None
+
+
+def _all_value(node: ast.AST) -> ast.expr | None:
+    """Read the value a statement assigns to ``__all__``, if it assigns one."""
+    if isinstance(node, ast.Assign):
+        targets: list[ast.expr] = list(node.targets)
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        targets = [node.target]
+    else:
+        return None
+    named = any(isinstance(target, ast.Name) and target.id == "__all__" for target in targets)
+    return node.value if named else None
+
+
+def _prose_constants(tree: ast.Module) -> set[int]:
+    """Find the string constants that talk about a name rather than write it.
+
+    A docstring is the first statement of a module, class or function, and an
+    ``__all__`` entry sits in the value assigned to that name, so both are
+    identifiable by structure rather than by guessing at their contents.
 
     Args:
-        name: The identifier to look for.
-        content: The file content, which must parse.
+        tree: The parsed file.
 
     Returns:
-        True if the file's code reads the identifier.
-
-    Raises:
-        SyntaxError: If the content cannot be parsed as Python.
+        The identities of the string constant nodes to discount.
     """
-    return any(_reads(node, name) for node in ast.walk(ast.parse(content)))
+    prose: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, DOCSTRING_HOLDERS):
+            docstring = _docstring_of(node)
+            if docstring is not None:
+                prose.add(id(docstring))
+        advertised = _all_value(node)
+        if advertised is not None:
+            prose.update(
+                id(child) for child in ast.walk(advertised) if _string_value(child) is not None
+            )
+    return prose
+
+
+def names_used(tree: ast.Module) -> frozenset[str]:
+    """Read every name a file uses.
+
+    A file uses a name when its syntax tree reads it, which a call, a
+    decorator, a default, a base class, an annotation, an attribute, an import,
+    and a parameter of that name all do, the last being how a fixture is asked
+    for. A file also uses a name when it writes it in a string constant, which
+    is how a name crosses a file boundary as data, the way a Django route
+    reaches a view.
+
+    A comment is not a use: the parser discards it, so it cannot be found in a
+    tree at all. A docstring and an ``__all__`` entry are not either, because
+    both are prose about a definition rather than a use of it, and crediting
+    them would leave a dead definition unreported. A re-export still counts,
+    because the ``__all__`` entry naming a definition is always accompanied by
+    the import that brings it in, and the import is a read.
+
+    A ``def`` or ``class`` statement binds its name without reading it, so a
+    definition never counts as its own use.
+
+    Args:
+        tree: The parsed file.
+
+    Returns:
+        Every name the file uses.
+    """
+    prose = _prose_constants(tree)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        names.update(_names_read(node))
+        written = _string_value(node)
+        if written is not None and id(node) not in prose:
+            names.update(WORDS.findall(written))
+    return frozenset(names)
+
+
+def read_searched(sources: dict[str, str]) -> Searched:
+    """Read every searched file as code, keeping the text of what will not parse.
+
+    Every file this tool reads is a Python file, so every one of them is read
+    as code. A file that raises ``SyntaxError`` keeps its raw text for the
+    blunt rule instead of failing the run.
+
+    Args:
+        sources: Every searched file, keyed by path, mapped to its content.
+
+    Returns:
+        The names used by each file that parses, and the raw text of each file
+        that does not, both in path order.
+    """
+    uses: dict[str, frozenset[str]] = {}
+    unparsed: dict[str, str] = {}
+    for path in sorted(sources):
+        try:
+            tree = ast.parse(sources[path], filename=path)
+        except SyntaxError:
+            unparsed[path] = sources[path]
+            continue
+        uses[path] = names_used(tree)
+    return Searched(uses=uses, unparsed=unparsed)
 
 
 def is_assumed_used_by_name(name: str, patterns: Sequence[str]) -> bool:
@@ -255,56 +364,61 @@ def unsearched_directory(template: str | None, package: str | None) -> str | Non
     return rendered if rendered.endswith("/") else rendered + "/"
 
 
+def _is_unsearched(path: str, unsearched: str | None) -> bool:
+    """Check whether a file sits in the directory left out of the search."""
+    return unsearched is not None and path.startswith(unsearched)
+
+
 def is_used(
     definition: Definition,
-    sources: dict[str, str],
+    searched: Searched,
     unsearched: str | None = None,
 ) -> bool:
-    """Check whether anything reads a definition.
+    """Check whether anything uses a definition.
 
-    The file that holds the definition is read as code, every other file as
-    text. A definition its own file calls is a helper doing its job and is
-    used; one its own file only mentions in prose is not.
+    Every file is read the same way, the file the definition lives in
+    included. A definition its own file calls is a helper doing its job and is
+    used; one that any file only mentions in a comment, a docstring or an
+    ``__all__`` entry is not.
 
     Args:
         definition: The definition to look for.
-        sources: Every searched file, keyed by path, mapped to its content.
+        searched: The searched files, read as code where they parse.
         unsearched: A directory to leave out of the search, if any, however
             often its files name the definition.
 
     Returns:
-        True if any file reads the definition.
+        True if any searched file uses the definition.
     """
-    for path, content in sources.items():
-        if unsearched is not None and path.startswith(unsearched):
-            continue
-        if path == definition.path:
-            if names_in_code(definition.name, content):
-                return True
-        elif names_in_text(definition.name, content):
+    name = definition.name
+    for path, used in searched.uses.items():
+        if not _is_unsearched(path, unsearched) and name in used:
+            return True
+    for path, content in searched.unparsed.items():
+        if not _is_unsearched(path, unsearched) and names_in_text(name, content):
             return True
     return False
 
 
 def unused_definitions(
     definitions: list[Definition],
-    sources: dict[str, str],
+    searched: Searched,
     unsearched_template: str | None = None,
 ) -> list[Finding]:
-    """Find the definitions nothing names.
+    """Find the definitions nothing uses.
 
     Args:
         definitions: The definitions to check.
-        sources: Every searched file, keyed by path, mapped to its content.
+        searched: The searched files, read as code where they parse.
         unsearched_template: A path template containing ``{package}`` whose
             files are left out of the search, if any.
 
     Returns:
-        A finding for each definition nothing names.
+        A finding for each definition nothing uses.
     """
     findings = []
     for definition in definitions:
         unsearched = unsearched_directory(unsearched_template, definition.package)
-        if not is_used(definition, sources, unsearched):
+        if not is_used(definition, searched, unsearched):
             findings.append(Finding(definition=definition))
     return findings

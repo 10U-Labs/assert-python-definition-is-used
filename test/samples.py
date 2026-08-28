@@ -38,6 +38,24 @@ def documented():
     return 3
 """
 
+NOTED = """\
+def called():
+    return 1
+
+
+def noted():
+    return 2
+"""
+
+NOTE = """\
+from pkg import called
+
+called()
+
+# we used to call noted here, removed it last year
+# noted()
+"""
+
 RUNTIME_INVOKED = """\
 import pytest
 
@@ -85,6 +103,11 @@ FULL_RUN = [
 OUTER_BOUND = FULL_RUN[:-2]
 
 CLEAN_RUN = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
+
+NOTED_PROJECT = {
+    "lib/python/pkg/__init__.py": NOTED,
+    "src/app.py": NOTE,
+}
 
 RUNTIME_PROJECT = {"test/pkg/test_pkg.py": RUNTIME_INVOKED}
 
