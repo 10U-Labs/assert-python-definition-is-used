@@ -3,7 +3,73 @@ concurrency:
   cancel-in-progress: true
   group: ${{ github.workflow }}-${{ github.ref }}
 jobs:
-  definition-is-used:
+  assert-no-comments:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install assert-no-comments
+      - name: assert-no-comments
+        run: >-
+          assert-no-comments
+          --verbose
+          ${{ github.workspace }}
+  assert-no-inline-directives:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install assert-no-inline-directives
+      - name: assert-no-inline-directives
+        run: >-
+          assert-no-inline-directives
+          --tools pylint,mypy,yamllint
+          --verbose
+          ${{ github.workspace }}/**/*
+  assert-no-linter-config-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install assert-no-linter-config-files
+      - name: assert-no-linter-config-files
+        run: >-
+          assert-no-linter-config-files
+          --linters pylint,mypy,yamllint
+          --verbose
+          ${{ github.workspace }}
+  assert-one-assert-per-pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install assert-one-assert-per-pytest
+      - name: assert-one-assert-per-pytest
+        run: >-
+          assert-one-assert-per-pytest
+          --verbose
+          ${{ github.workspace }}/test
+  assert-python-definition-is-used:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -105,75 +171,6 @@ jobs:
         run: pip install mypy pytest -e .
       - name: mypy (test)
         run: python3 -m mypy test/
-  no-comments:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: pip install assert-no-comments
-      - name: assert-no-comments
-        run: >-
-          assert-no-comments
-          .github/workflows
-          action.yml
-          src
-          test
-          --verbose
-  no-inline-directives:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: pip install assert-no-inline-directives
-      - name: assert-no-inline-directives
-        run: >-
-          assert-no-inline-directives
-          --tools pylint,mypy,yamllint
-          --verbose
-          ${{ github.workspace }}/**/*
-  no-linter-configs:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: pip install assert-no-linter-config-files
-      - name: assert-no-linter-config-files
-        run: >-
-          assert-no-linter-config-files
-          --linters pylint,mypy,yamllint
-          --verbose
-          ${{ github.workspace }}
-  one-assert-per-pytest:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: pip install assert-one-assert-per-pytest
-      - name: assert-one-assert-per-pytest
-        run: >-
-          assert-one-assert-per-pytest
-          --verbose
-          ${{ github.workspace }}/test
   pylint-src:
     runs-on: ubuntu-latest
     steps:
@@ -203,17 +200,17 @@ jobs:
   release:
     if: github.event_name == 'push'
     needs:
-      - definition-is-used
+      - assert-no-comments
+      - assert-no-inline-directives
+      - assert-no-linter-config-files
+      - assert-one-assert-per-pytest
+      - assert-python-definition-is-used
       - e2e-tests
       - integration-tests
       - jscpd-src
       - jscpd-test
       - mypy-src
       - mypy-test
-      - no-comments
-      - no-inline-directives
-      - no-linter-configs
-      - one-assert-per-pytest
       - pylint-src
       - pylint-test
       - unit-tests
