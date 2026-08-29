@@ -1,5 +1,3 @@
-"""Sample source trees the integration and end-to-end tiers are run against."""
-
 from __future__ import annotations
 
 LIBRARY = """\

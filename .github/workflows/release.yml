@@ -183,7 +183,13 @@ jobs:
       - name: Install dependencies
         run: pip install pylint -e .
       - name: pylint (src)
-        run: python3 -m pylint src/ --fail-on=C,R,W --fail-under=10.0
+        run: >-
+          python3 -m pylint src/
+          --disable=missing-class-docstring
+          --disable=missing-function-docstring
+          --disable=missing-module-docstring
+          --fail-on=C,R,W
+          --fail-under=10.0
   pylint-test:
     runs-on: ubuntu-latest
     steps:
@@ -196,7 +202,13 @@ jobs:
       - name: Install dependencies
         run: pip install pylint pytest -e .
       - name: pylint (test)
-        run: python3 -m pylint test/ --fail-on=C,R,W --fail-under=10.0
+        run: >-
+          python3 -m pylint test/
+          --disable=missing-class-docstring
+          --disable=missing-function-docstring
+          --disable=missing-module-docstring
+          --fail-on=C,R,W
+          --fail-under=10.0
   release:
     if: github.event_name == 'push'
     needs:

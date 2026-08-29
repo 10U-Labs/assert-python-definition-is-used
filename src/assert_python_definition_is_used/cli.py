@@ -1,5 +1,3 @@
-"""Command-line interface for assert-python-definition-is-used."""
-
 from __future__ import annotations
 
 import argparse
@@ -32,8 +30,6 @@ GLOB_CHARACTERS = ("*", "?", "[")
 
 @dataclass
 class ScanResult:
-    """The outcome of one run over a set of trees."""
-
     findings: list[Finding] = field(default_factory=list)
     definitions_read: int = 0
     assumed_by_name: int = 0
@@ -43,7 +39,6 @@ class ScanResult:
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
         prog="assert-python-definition-is-used",
         description=(
@@ -144,26 +139,16 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def parse_patterns(patterns_str: str | None) -> list[str]:
-    """Parse a comma-separated patterns string.
-
-    Args:
-        patterns_str: Comma-separated patterns, or None.
-
-    Returns:
-        The patterns, empty when the input is None or blank.
-    """
     if not patterns_str:
         return []
     return [pattern.strip() for pattern in patterns_str.split(",") if pattern.strip()]
 
 
 def _is_glob_pattern(path: str) -> bool:
-    """Check whether a path holds glob wildcard characters."""
     return any(character in path for character in GLOB_CHARACTERS)
 
 
 def _walk_python_files(directory: str) -> list[str]:
-    """Find every *.py file under a directory, ignoring hidden directories."""
     found: list[str] = []
     for root, directories, filenames in os.walk(directory):
         directories[:] = [name for name in directories if not name.startswith(".")]
@@ -174,14 +159,6 @@ def _walk_python_files(directory: str) -> list[str]:
 
 
 def _expand(path: str) -> tuple[list[str], bool]:
-    """Expand one path, directory or glob into the files it names.
-
-    Args:
-        path: A file path, directory path or glob pattern.
-
-    Returns:
-        The files it names, and whether it named anything at all.
-    """
     if _is_glob_pattern(path):
         matched = glob.glob(path, recursive=True, include_hidden=True)
         found: list[str] = []
@@ -199,18 +176,6 @@ def _expand(path: str) -> tuple[list[str], bool]:
 
 
 def package_of(path: str, tree: str) -> str | None:
-    """Name the package a file belongs to, relative to the tree holding it.
-
-    A file sitting directly in the tree belongs to no package, and so has no
-    directory of its own to discount.
-
-    Args:
-        path: The file path.
-        tree: The tree the file was found under.
-
-    Returns:
-        The first path component below the tree, or None.
-    """
     relative = os.path.relpath(os.path.normpath(path), os.path.normpath(tree))
     parts = relative.split(os.sep)
     if len(parts) < 2 or parts[0] in ("", os.pardir):
@@ -219,7 +184,6 @@ def package_of(path: str, tree: str) -> str | None:
 
 
 def _tree_root(path: str) -> str:
-    """Reduce a tree argument to the directory its files hang from."""
     if os.path.isdir(path):
         return path
     stripped = path.split("*")[0].split("?")[0].split("[")[0]
@@ -228,15 +192,6 @@ def _tree_root(path: str) -> str:
 
 
 def should_skip(path: str, exclude_patterns: list[str]) -> bool:
-    """Check whether a file matches any exclude pattern.
-
-    Args:
-        path: The file path to check.
-        exclude_patterns: Glob patterns to exclude.
-
-    Returns:
-        True when the path or its basename matches a pattern.
-    """
     return any(
         fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(os.path.basename(path), pattern)
         for pattern in exclude_patterns
@@ -244,16 +199,6 @@ def should_skip(path: str, exclude_patterns: list[str]) -> bool:
 
 
 def _collect(paths: Sequence[str], exclude_patterns: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Expand paths into files, keeping the tree each file came from.
-
-    Args:
-        paths: File paths, directory paths or glob patterns.
-        exclude_patterns: Glob patterns to exclude.
-
-    Returns:
-        A mapping of normalised file path to the tree it came from, and the
-        paths that named nothing.
-    """
     trees: dict[str, str] = {}
     missing: list[str] = []
     for path in paths:
@@ -270,7 +215,6 @@ def _collect(paths: Sequence[str], exclude_patterns: list[str]) -> tuple[dict[st
 
 
 def _read(path: str, result: ScanResult, verbose: bool) -> str | None:
-    """Read one file, recording an error on the result if it cannot be read."""
     try:
         with open(path, encoding="utf-8") as handle:
             return handle.read()
@@ -285,16 +229,6 @@ def _read(path: str, result: ScanResult, verbose: bool) -> str | None:
 def read_sources(
     paths: dict[str, str], result: ScanResult, verbose: bool = False
 ) -> dict[str, str]:
-    """Read every file, keyed by path.
-
-    Args:
-        paths: A mapping of file path to the tree it came from.
-        result: The result to record read errors on.
-        verbose: Whether to name each file read.
-
-    Returns:
-        A mapping of file path to content, skipping the unreadable.
-    """
     sources: dict[str, str] = {}
     for path in sorted(paths):
         content = _read(path, result, verbose)
@@ -309,17 +243,6 @@ def read_definitions(
     result: ScanResult,
     verbose: bool = False,
 ) -> list[Definition]:
-    """Parse every definition file for its public top-level definitions.
-
-    Args:
-        paths: A mapping of definition file path to the tree it came from.
-        sources: Every readable file, keyed by path.
-        result: The result to record parse errors and counts on.
-        verbose: Whether to name each file scanned.
-
-    Returns:
-        Every public definition found, in path order.
-    """
     definitions: list[Definition] = []
     for path in sorted(paths):
         if path not in sources:
@@ -339,11 +262,6 @@ def read_definitions(
 
 
 def report_unparsed(searched: Searched) -> None:
-    """Name each searched file that fell back to the whole-word text rule.
-
-    Args:
-        searched: The searched files, read as code where they parse.
-    """
     for path in searched.unparsed:
         print(f"Searching as text (will not parse): {path}")
 
@@ -351,16 +269,6 @@ def report_unparsed(searched: Searched) -> None:
 def assume_used(
     definitions: list[Definition], args: argparse.Namespace, result: ScanResult
 ) -> list[Definition]:
-    """Drop the definitions the caller's assumptions cover, counting each ground.
-
-    Args:
-        definitions: The definitions read from the trees.
-        args: The parsed arguments, holding the two assumption inputs.
-        result: The result to record the counts on.
-
-    Returns:
-        The definitions still to search for.
-    """
     to_check, by_name, by_decorator = assumed_used(
         definitions,
         parse_patterns(args.assume_used_matching),
@@ -372,12 +280,6 @@ def assume_used(
 
 
 def output_findings(findings: list[Finding], count_mode: bool = False) -> None:
-    """Print findings in the requested format.
-
-    Args:
-        findings: The findings to print.
-        count_mode: Print only how many there are.
-    """
     if count_mode:
         print(len(findings))
         return
@@ -386,15 +288,6 @@ def output_findings(findings: list[Finding], count_mode: bool = False) -> None:
 
 
 def determine_exit_code(result: ScanResult, warn_only: bool = False) -> int:
-    """Choose the exit code for a result.
-
-    Args:
-        result: The scan result.
-        warn_only: Always succeed when true.
-
-    Returns:
-        0 for success, 1 for findings, 2 for errors.
-    """
     if warn_only:
         return EXIT_SUCCESS
     if result.findings:
@@ -405,7 +298,6 @@ def determine_exit_code(result: ScanResult, warn_only: bool = False) -> int:
 
 
 def _report(result: ScanResult, args: argparse.Namespace) -> None:
-    """Print whatever the chosen output mode asks for."""
     if args.verbose:
         print()
         print(f"Files scanned: {result.files_scanned}")
@@ -425,11 +317,6 @@ def _report(result: ScanResult, args: argparse.Namespace) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run the CLI.
-
-    Args:
-        argv: Command-line arguments, defaulting to sys.argv[1:].
-    """
     args = create_parser().parse_args(argv)
     exclude_patterns = parse_patterns(args.exclude)
     result = ScanResult()
