@@ -120,6 +120,16 @@ OUTER_BOUND = FULL_RUN[:-2]
 
 CLEAN_RUN = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
 
+LIB_AND_TEST_RUN = [
+    "lib/python",
+    "--search-in",
+    "lib/python",
+    "--search-in",
+    "test",
+    "--dont-search-in",
+    "test/lib/python/test_{package}",
+]
+
 NOTED_PROJECT = {
     "lib/python/pkg/__init__.py": NOTED,
     "src/app.py": NOTE,

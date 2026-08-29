@@ -32,8 +32,7 @@ from assert_python_definition_is_used.cli import (
 from assert_python_definition_is_used.scanner import Definition, Finding
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from test.runners import ExitCodeOf, StderrOf, StdoutOf, WriteTree
 
 TREE = {
     "lib/python/pkg/__init__.py": "def widget():\n    pass\n\n\ndef gadget():\n    pass\n",
@@ -51,6 +50,10 @@ RUNTIME_TREE = {
 }
 
 ASSUMED = ["--assume-used-matching", "test_*", "--assume-used-decorated-with", "pytest.fixture"]
+
+SEARCH_EVERYWHERE = ["--search-in", "lib/python", "--search-in", "src", "--search-in", "test"]
+
+FULL_RUN = ["lib/python", *SEARCH_EVERYWHERE, "--dont-search-in", "test/lib/python/test_{package}"]
 
 
 def _arguments(extra: list[str]) -> argparse.Namespace:
@@ -225,9 +228,7 @@ class TestPackageOf:
 class TestTreeRoot:
     """Tests for _tree_root."""
 
-    def test_a_directory_is_its_own_root(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_a_directory_is_its_own_root(self, write_tree: WriteTree) -> None:
         """A real directory is returned unchanged."""
         write_tree(TREE)
         assert _tree_root("lib/python") == "lib/python"
@@ -270,23 +271,19 @@ class TestShouldSkip:
 class TestWalkPythonFiles:
     """Tests for _walk_python_files."""
 
-    def test_finds_a_nested_file(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_finds_a_nested_file(self, write_tree: WriteTree) -> None:
         """A file below the directory is found."""
         write_tree(TREE)
         assert "lib/python/pkg/__init__.py" in [
             os.path.normpath(path) for path in _walk_python_files("lib/python")
         ]
 
-    def test_ignores_a_hidden_directory(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_ignores_a_hidden_directory(self, write_tree: WriteTree) -> None:
         """A dot directory is not walked."""
         write_tree({**TREE, "lib/python/.hidden/mod.py": "def buried():\n    pass\n"})
         assert not any("hidden" in path for path in _walk_python_files("lib/python"))
 
-    def test_ignores_a_non_python_file(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_ignores_a_non_python_file(self, write_tree: WriteTree) -> None:
         """A file that is not Python is not returned."""
         write_tree({**TREE, "lib/python/pkg/notes.txt": "text\n"})
         assert not any(path.endswith(".txt") for path in _walk_python_files("lib/python"))
@@ -296,24 +293,22 @@ class TestWalkPythonFiles:
 class TestExpand:
     """Tests for _expand."""
 
-    def test_expands_a_directory(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_expands_a_directory(self, write_tree: WriteTree) -> None:
         """A directory yields the Python files under it."""
         write_tree(TREE)
         assert _expand("lib/python")[0]
 
-    def test_expands_a_file(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_expands_a_file(self, write_tree: WriteTree) -> None:
         """A file yields itself."""
         write_tree(TREE)
         assert _expand("src/app.py")[0] == ["src/app.py"]
 
-    def test_expands_a_glob(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_expands_a_glob(self, write_tree: WriteTree) -> None:
         """A pattern yields what it matches."""
         write_tree(TREE)
         assert _expand("src/*.py")[0] == ["src/app.py"]
 
-    def test_a_glob_matching_a_directory_is_walked(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_a_glob_matching_a_directory_is_walked(self, write_tree: WriteTree) -> None:
         """A pattern matching a directory yields the files inside it."""
         write_tree(TREE)
         assert any(path.endswith("__init__.py") for path in _expand("lib/python/*")[0])
@@ -322,17 +317,13 @@ class TestExpand:
         """A path naming nothing reports that it matched nothing."""
         assert _expand("no/such/place")[1] is False
 
-    def test_a_glob_matching_a_broken_link_yields_nothing(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_a_glob_matching_a_broken_link_yields_nothing(self, write_tree: WriteTree) -> None:
         """A pattern matching something that is neither file nor directory yields nothing."""
         root = write_tree(TREE)
         os.symlink("nowhere", root / "src" / "broken.py")
         assert not _expand("src/broken.py*")[0]
 
-    def test_reports_a_glob_matching_nothing(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_reports_a_glob_matching_nothing(self, write_tree: WriteTree) -> None:
         """A pattern matching nothing reports that it matched nothing."""
         write_tree(TREE)
         assert _expand("no/such/*.py")[1] is False
@@ -342,16 +333,14 @@ class TestExpand:
 class TestCollect:
     """Tests for _collect."""
 
-    def test_maps_a_file_to_its_tree(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_maps_a_file_to_its_tree(self, write_tree: WriteTree) -> None:
         """Each file remembers the tree it was found under."""
         write_tree(TREE)
         assert _collect(["lib/python"], [])[0][os.path.normpath("lib/python/pkg/__init__.py")] == (
             "lib/python"
         )
 
-    def test_applies_the_exclude_patterns(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_applies_the_exclude_patterns(self, write_tree: WriteTree) -> None:
         """An excluded file is left out."""
         write_tree(TREE)
         assert not _collect(["lib/python"], ["__init__.py"])[0]
@@ -360,17 +349,13 @@ class TestCollect:
         """A tree naming nothing is reported as missing."""
         assert _collect(["no/such/place"], [])[1] == ["no/such/place"]
 
-    def test_keeps_the_first_tree_for_a_shared_file(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_keeps_the_first_tree_for_a_shared_file(self, write_tree: WriteTree) -> None:
         """A file reachable from two trees keeps the first tree named."""
         write_tree(TREE)
         collected, _ = _collect(["lib/python", "lib"], [])
         assert collected[os.path.normpath("lib/python/pkg/__init__.py")] == "lib/python"
 
-    def test_ignores_a_non_python_file_named_directly(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_ignores_a_non_python_file_named_directly(self, write_tree: WriteTree) -> None:
         """A file that is not Python is not collected even when named."""
         write_tree({**TREE, "notes.txt": "text\n"})
         assert not _collect(["notes.txt"], [])[0]
@@ -380,7 +365,7 @@ class TestCollect:
 class TestRead:
     """Tests for _read and read_sources."""
 
-    def test_reads_a_file(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_reads_a_file(self, write_tree: WriteTree) -> None:
         """A readable file comes back as text."""
         write_tree(TREE)
         assert _read("src/app.py", ScanResult(), False) == TREE["src/app.py"]
@@ -395,16 +380,12 @@ class TestRead:
         _read("no/such/file.py", result, False)
         assert result.had_error is True
 
-    def test_a_missing_file_is_named_when_verbose(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_a_missing_file_is_named_when_verbose(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Verbose output says which file was skipped."""
         _read("no/such/file.py", ScanResult(), True)
         assert "Skipping (unreadable)" in capsys.readouterr().out
 
-    def test_read_sources_keys_by_path(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_read_sources_keys_by_path(self, write_tree: WriteTree) -> None:
         """Every readable file is returned, keyed by its path."""
         write_tree(TREE)
         expected = {"src/app.py": TREE["src/app.py"]}
@@ -419,14 +400,14 @@ class TestRead:
 class TestReadDefinitions:
     """Tests for read_definitions."""
 
-    def test_finds_the_definitions(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_finds_the_definitions(self, write_tree: WriteTree) -> None:
         """Every public definition in the file is returned."""
         write_tree(TREE)
         paths = {"lib/python/pkg/__init__.py": "lib/python"}
         found = read_definitions(paths, read_sources(paths, ScanResult()), ScanResult())
         assert [item.name for item in found] == ["widget", "gadget"]
 
-    def test_counts_the_files_scanned(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_counts_the_files_scanned(self, write_tree: WriteTree) -> None:
         """The result records how many files were parsed."""
         write_tree(TREE)
         paths = {"lib/python/pkg/__init__.py": "lib/python"}
@@ -434,9 +415,7 @@ class TestReadDefinitions:
         read_definitions(paths, read_sources(paths, ScanResult()), result)
         assert result.files_scanned == 1
 
-    def test_counts_the_definitions_read(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_counts_the_definitions_read(self, write_tree: WriteTree) -> None:
         """The result records how many definitions were found."""
         write_tree(TREE)
         paths = {"lib/python/pkg/__init__.py": "lib/python"}
@@ -445,7 +424,7 @@ class TestReadDefinitions:
         assert result.definitions_read == 2
 
     def test_names_each_file_when_verbose(
-        self, write_tree: Callable[[dict[str, str]], Path], capsys: pytest.CaptureFixture[str]
+        self, write_tree: WriteTree, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Verbose output names each file scanned."""
         write_tree(TREE)
@@ -457,9 +436,7 @@ class TestReadDefinitions:
         """A file missing from the sources is passed over."""
         assert not read_definitions({"gone.py": "."}, {}, ScanResult())
 
-    def test_records_an_error_for_unparseable_content(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_records_an_error_for_unparseable_content(self, write_tree: WriteTree) -> None:
         """A file that is not Python marks the result."""
         write_tree({"lib/python/pkg/bad.py": "def widget(:\n"})
         paths = {"lib/python/pkg/bad.py": "lib/python"}
@@ -467,9 +444,7 @@ class TestReadDefinitions:
         read_definitions(paths, read_sources(paths, ScanResult()), result)
         assert result.had_error is True
 
-    def test_carries_the_package_through(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_carries_the_package_through(self, write_tree: WriteTree) -> None:
         """A definition knows which package it came from."""
         write_tree(TREE)
         paths = {"lib/python/pkg/__init__.py": "lib/python"}
@@ -575,260 +550,121 @@ class TestDetermineExitCode:
 class TestMain:
     """Tests for main, driven through the in-process runner."""
 
-    def test_reports_an_unused_definition(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_reports_an_unused_definition(self, stdout_of: StdoutOf) -> None:
         """A definition only its own tests name is reported."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(
-            ["lib/python", "--search-in", "lib/python", "--search-in", "src", "--search-in", "test",
-             "--dont-search-in", "test/lib/python/test_{package}"]
-        )
-        assert "widget" in stdout
+        assert "widget" in stdout_of(TREE, FULL_RUN)
 
-    def test_stays_quiet_about_a_used_definition(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_stays_quiet_about_a_used_definition(self, stdout_of: StdoutOf) -> None:
         """A definition another tree names is not reported."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(
-            ["lib/python", "--search-in", "lib/python", "--search-in", "src", "--search-in", "test",
-             "--dont-search-in", "test/lib/python/test_{package}"]
-        )
-        assert "gadget" not in stdout
+        assert "gadget" not in stdout_of(TREE, FULL_RUN)
 
-    def test_the_search_defaults_to_the_trees(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_search_defaults_to_the_trees(self, exit_code_of: ExitCodeOf) -> None:
         """Without --search-in only the definition trees are searched."""
-        write_tree(TREE)
-        exit_code, _, _ = run_cli(["lib/python"])
-        assert exit_code == EXIT_FINDINGS
+        assert exit_code_of(TREE, ["lib/python"]) == EXIT_FINDINGS
 
-    def test_exits_clean_when_nothing_is_unused(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_exits_clean_when_nothing_is_unused(self, exit_code_of: ExitCodeOf) -> None:
         """A tree with nothing to report exits zero."""
-        write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\n",
-                    "src/app.py": "widget()\n"})
-        exit_code, _, _ = run_cli(["lib/python", "--search-in", "lib/python", "--search-in", "src"])
-        assert exit_code == EXIT_SUCCESS
+        tree = {"lib/python/pkg/__init__.py": "def widget():\n    pass\n",
+                "src/app.py": "widget()\n"}
+        run = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
+        assert exit_code_of(tree, run) == EXIT_SUCCESS
 
-    def test_names_a_missing_tree(
-        self, run_cli: Callable[[list[str]], tuple[int, str, str]]
-    ) -> None:
+    def test_names_a_missing_tree(self, stderr_of: StderrOf) -> None:
         """A tree that does not exist is named on stderr."""
-        _, _, stderr = run_cli(["no/such/place"])
-        assert "Path not found: no/such/place" in stderr
+        assert "Path not found: no/such/place" in stderr_of({}, ["no/such/place"])
 
-    def test_a_missing_tree_alone_is_an_error(
-        self, run_cli: Callable[[list[str]], tuple[int, str, str]]
-    ) -> None:
+    def test_a_missing_tree_alone_is_an_error(self, exit_code_of: ExitCodeOf) -> None:
         """With no definition files at all the run is an error."""
-        exit_code, _, _ = run_cli(["no/such/place"])
-        assert exit_code == EXIT_ERROR
+        assert exit_code_of({}, ["no/such/place"]) == EXIT_ERROR
 
-    def test_a_missing_search_tree_marks_an_error(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_missing_search_tree_marks_an_error(self, exit_code_of: ExitCodeOf) -> None:
         """A missing search tree is an error even when definitions were read."""
-        write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\nwidget()\n"})
-        exit_code, _, _ = run_cli(
-            ["lib/python", "--search-in", "lib/python", "--search-in", "no/such/place"]
-        )
-        assert exit_code == EXIT_ERROR
+        tree = {"lib/python/pkg/__init__.py": "def widget():\n    pass\nwidget()\n"}
+        run = ["lib/python", "--search-in", "lib/python", "--search-in", "no/such/place"]
+        assert exit_code_of(tree, run) == EXIT_ERROR
 
-    def test_quiet_prints_nothing(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_quiet_prints_nothing(self, stdout_of: StdoutOf) -> None:
         """Quiet mode reports through the exit code alone."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--quiet"])
-        assert stdout == ""
+        assert stdout_of(TREE, ["lib/python", "--quiet"]) == ""
 
-    def test_count_prints_a_number(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_count_prints_a_number(self, stdout_of: StdoutOf) -> None:
         """Count mode prints how many were found."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "2\n"
+        assert stdout_of(TREE, ["lib/python", "--count"]) == "2\n"
 
-    def test_verbose_summarises(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_verbose_summarises(self, stdout_of: StdoutOf) -> None:
         """Verbose mode ends with a count of definitions read."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--verbose"])
-        assert "Definitions read: 2" in stdout
+        assert "Definitions read: 2" in stdout_of(TREE, ["lib/python", "--verbose"])
 
-    def test_verbose_names_the_findings(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_verbose_names_the_findings(self, stdout_of: StdoutOf) -> None:
         """Verbose mode lists each unused definition."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--verbose"])
+        stdout = stdout_of(TREE, ["lib/python", "--verbose"])
         assert "Unused: lib/python/pkg/__init__.py:1:widget" in stdout
 
-    def test_verbose_names_the_exclude_patterns(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_verbose_names_the_exclude_patterns(self, stdout_of: StdoutOf) -> None:
         """Verbose mode says what was excluded."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--verbose", "--exclude", "nothing.py"])
-        assert "Excluding patterns: nothing.py" in stdout
+        run = ["lib/python", "--verbose", "--exclude", "nothing.py"]
+        assert "Excluding patterns: nothing.py" in stdout_of(TREE, run)
 
-    def test_verbose_reports_an_error(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_verbose_reports_an_error(self, stdout_of: StdoutOf) -> None:
         """Verbose mode says when something went wrong."""
-        write_tree({"lib/python/pkg/bad.py": "def widget(:\n"})
-        _, stdout, _ = run_cli(["lib/python", "--verbose"])
+        stdout = stdout_of({"lib/python/pkg/bad.py": "def widget(:\n"}, ["lib/python", "--verbose"])
         assert "Errors occurred during scanning." in stdout
 
-    def test_fail_fast_reports_one(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_fail_fast_reports_one(self, stdout_of: StdoutOf) -> None:
         """Failing fast stops after the first finding."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--fail-fast", "--count"])
-        assert stdout == "1\n"
+        assert stdout_of(TREE, ["lib/python", "--fail-fast", "--count"]) == "1\n"
 
-    def test_warn_only_exits_clean(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_warn_only_exits_clean(self, exit_code_of: ExitCodeOf) -> None:
         """Warn-only reports findings but succeeds."""
-        write_tree(TREE)
-        exit_code, _, _ = run_cli(["lib/python", "--warn-only"])
-        assert exit_code == EXIT_SUCCESS
+        assert exit_code_of(TREE, ["lib/python", "--warn-only"]) == EXIT_SUCCESS
 
-    def test_exclude_leaves_a_file_out(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_exclude_leaves_a_file_out(self, stdout_of: StdoutOf) -> None:
         """An excluded definition file yields no definitions."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python", "--exclude", "__init__.py", "--count"])
-        assert stdout == "0\n"
+        run = ["lib/python", "--exclude", "__init__.py", "--count"]
+        assert stdout_of(TREE, run) == "0\n"
 
-    def test_a_sibling_call_is_a_use(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_sibling_call_is_a_use(self, stdout_of: StdoutOf) -> None:
         """A call from elsewhere in the same file is a use."""
-        write_tree({"lib/python/pkg/__init__.py": "def widget():\n    pass\n\n\nwidget()\n"})
-        _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "0\n"
+        tree = {"lib/python/pkg/__init__.py": "def widget():\n    pass\n\n\nwidget()\n"}
+        assert stdout_of(tree, ["lib/python", "--count"]) == "0\n"
 
-    def test_a_docstring_mention_is_not_a_use(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_docstring_mention_is_not_a_use(self, stdout_of: StdoutOf) -> None:
         """A name its own file only mentions in prose is still a finding."""
         source = '"""Call widget()."""\n\n\ndef widget():\n    pass\n'
-        write_tree({"lib/python/pkg/__init__.py": source})
-        _, stdout, _ = run_cli(["lib/python", "--count"])
-        assert stdout == "1\n"
+        assert stdout_of({"lib/python/pkg/__init__.py": source}, ["lib/python", "--count"]) == "1\n"
 
-    def test_a_glob_names_the_trees(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_glob_names_the_trees(self, stdout_of: StdoutOf) -> None:
         """A pattern works in place of a directory."""
-        write_tree(TREE)
-        _, stdout, _ = run_cli(["lib/python/**/*.py", "--count"])
-        assert stdout == "2\n"
+        assert stdout_of(TREE, ["lib/python/**/*.py", "--count"]) == "2\n"
 
 
 @pytest.mark.unit
 class TestMainWithAssumptions:
     """Tests for main over definitions a runtime invokes."""
 
-    def test_a_runtime_tree_fails_without_the_inputs(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_runtime_tree_fails_without_the_inputs(self, exit_code_of: ExitCodeOf) -> None:
         """Every definition pytest invokes reads as unused today."""
-        write_tree(RUNTIME_TREE)
-        exit_code, _, _ = run_cli(["test"])
-        assert exit_code == EXIT_FINDINGS
+        assert exit_code_of(RUNTIME_TREE, ["test"]) == EXIT_FINDINGS
 
-    def test_a_runtime_tree_passes_with_the_inputs(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_runtime_tree_passes_with_the_inputs(self, exit_code_of: ExitCodeOf) -> None:
         """Naming what the runtime invokes clears the tree."""
-        write_tree(RUNTIME_TREE)
-        exit_code, _, _ = run_cli(["test", *ASSUMED])
-        assert exit_code == EXIT_SUCCESS
+        assert exit_code_of(RUNTIME_TREE, ["test", *ASSUMED]) == EXIT_SUCCESS
 
-    def test_the_summary_counts_the_names_claimed(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_summary_counts_the_names_claimed(self, stdout_of: StdoutOf) -> None:
         """Verbose says how many a name pattern claimed."""
-        write_tree(RUNTIME_TREE)
-        _, stdout, _ = run_cli(["test", "--verbose", *ASSUMED])
+        stdout = stdout_of(RUNTIME_TREE, ["test", "--verbose", *ASSUMED])
         assert "Assumed used by name: 1" in stdout
 
-    def test_the_summary_counts_the_decorators_claimed(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_summary_counts_the_decorators_claimed(self, stdout_of: StdoutOf) -> None:
         """Verbose says how many a decorator path claimed."""
-        write_tree(RUNTIME_TREE)
-        _, stdout, _ = run_cli(["test", "--verbose", *ASSUMED])
+        stdout = stdout_of(RUNTIME_TREE, ["test", "--verbose", *ASSUMED])
         assert "Assumed used by decorator: 1" in stdout
 
-    def test_the_summary_stays_quiet_when_nothing_is_claimed(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_summary_stays_quiet_when_nothing_is_claimed(self, stdout_of: StdoutOf) -> None:
         """A run passing neither input prints the summary it always did."""
-        write_tree(RUNTIME_TREE)
-        _, stdout, _ = run_cli(["test", "--verbose"])
-        assert "Assumed used" not in stdout
+        assert "Assumed used" not in stdout_of(RUNTIME_TREE, ["test", "--verbose"])
 
-    def test_a_name_outside_the_patterns_is_reported(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_name_outside_the_patterns_is_reported(self, exit_code_of: ExitCodeOf) -> None:
         """A name the patterns do not match is searched for as before."""
-        write_tree({"test/pkg/helpers.py": "def spare():\n    pass\n"})
-        assert run_cli(["test", *ASSUMED])[0] == EXIT_FINDINGS
+        tree = {"test/pkg/helpers.py": "def spare():\n    pass\n"}
+        assert exit_code_of(tree, ["test", *ASSUMED]) == EXIT_FINDINGS

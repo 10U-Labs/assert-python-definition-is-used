@@ -60,31 +60,24 @@ from assert_python_definition_is_used.scanner import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from test.runners import WriteTree
 
 
 @pytest.mark.integration
 class TestHelpersOverRealFiles:
     """The functions behind the CLI, exercised against files on disk."""
 
-    def test_walk_finds_the_python_files(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_walk_finds_the_python_files(self, write_tree: WriteTree) -> None:
         """Walking a directory finds the Python below it."""
         write_tree(PROJECT)
         assert len(_walk_python_files("lib/python")) == 1
 
-    def test_expand_reports_a_directory_matched(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_expand_reports_a_directory_matched(self, write_tree: WriteTree) -> None:
         """A directory that exists reports as matched."""
         write_tree(PROJECT)
         assert _expand("lib/python")[1] is True
 
-    def test_expand_skips_a_broken_link(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_expand_skips_a_broken_link(self, write_tree: WriteTree) -> None:
         """A pattern matching neither a file nor a directory yields nothing."""
         root = write_tree(PROJECT)
         os.symlink("nowhere", root / "src" / "broken.py")
@@ -94,9 +87,7 @@ class TestHelpersOverRealFiles:
         """A path that does not exist reports as unmatched."""
         assert _expand("no/such/path")[1] is False
 
-    def test_collect_maps_files_to_their_tree(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_collect_maps_files_to_their_tree(self, write_tree: WriteTree) -> None:
         """Collecting keeps the tree each file was found under."""
         write_tree(PROJECT)
         collected, _ = _collect(["lib/python"], [])
@@ -106,22 +97,18 @@ class TestHelpersOverRealFiles:
         """Collecting reports the paths that named nothing."""
         assert _collect(["no/such/path"], [])[1] == ["no/such/path"]
 
-    def test_read_sources_reads_the_files(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_read_sources_reads_the_files(self, write_tree: WriteTree) -> None:
         """Reading returns the text of every file collected."""
         write_tree(PROJECT)
         collected, _ = _collect(["lib/python"], [])
         assert list(read_sources(collected, ScanResult()).values()) == [LIBRARY]
 
-    def test_read_returns_the_text(self, write_tree: Callable[[dict[str, str]], Path]) -> None:
+    def test_read_returns_the_text(self, write_tree: WriteTree) -> None:
         """Reading one file returns its text."""
         write_tree(PROJECT)
         assert _read(os.path.join("src", "app.py"), ScanResult(), False) == CALLER
 
-    def test_read_marks_an_unreadable_file(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_read_marks_an_unreadable_file(self, write_tree: WriteTree) -> None:
         """A directory named like a module cannot be read."""
         root = write_tree(PROJECT)
         os.symlink("nowhere", root / "broken.py")
@@ -129,16 +116,12 @@ class TestHelpersOverRealFiles:
         _read("broken.py", result, False)
         assert result.had_error is True
 
-    def test_read_definitions_skips_what_was_not_read(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_read_definitions_skips_what_was_not_read(self, write_tree: WriteTree) -> None:
         """A file missing from the sources yields no definitions."""
         write_tree(PROJECT)
         assert not read_definitions({"gone.py": "."}, {}, ScanResult())
 
-    def test_read_definitions_finds_them(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_read_definitions_finds_them(self, write_tree: WriteTree) -> None:
         """Every public definition in the tree is found."""
         write_tree(PROJECT)
         collected, _ = _collect(["lib/python"], [])
@@ -147,7 +130,7 @@ class TestHelpersOverRealFiles:
 
     def test_read_definitions_names_files_when_verbose(
         self,
-        write_tree: Callable[[dict[str, str]], Path],
+        write_tree: WriteTree,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Verbose reading names the file it is on."""
@@ -173,9 +156,7 @@ class TestPathHelpers:
         """A file that is not under the tree belongs to no package."""
         assert package_of(os.path.join("other", "mod.py"), "lib/python") is None
 
-    def test_tree_root_of_a_directory(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_tree_root_of_a_directory(self, write_tree: WriteTree) -> None:
         """A directory is its own root."""
         write_tree(PROJECT)
         assert _tree_root("lib/python") == "lib/python"
@@ -263,9 +244,7 @@ class TestReportingHelpers:
 class TestScannerOverRealFiles:
     """The scanner functions, exercised against text read from disk."""
 
-    def test_public_definitions_reads_a_file(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_public_definitions_reads_a_file(self, write_tree: WriteTree) -> None:
         """Parsing a real file finds its definitions."""
         write_tree(PROJECT)
         path = os.path.join("lib", "python", "pkg", "__init__.py")
@@ -352,9 +331,7 @@ class TestScannerOverRealFiles:
 class TestAssumptionsOverRealFiles:
     """The assumption rules, exercised against text read from disk."""
 
-    def test_public_definitions_reads_the_decorators(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_public_definitions_reads_the_decorators(self, write_tree: WriteTree) -> None:
         """Parsing a real file records the decorators each definition carries."""
         write_tree(RUNTIME_PROJECT)
         path = os.path.join("test", "pkg", "test_pkg.py")

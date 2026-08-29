@@ -21,66 +21,34 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from test.runners import ExitCodeOf, RunOver, StdoutOf, WriteTree
+
 
 @pytest.mark.e2e
 class TestTheCommandAsAStepRunsIt:
     """The command as a workflow step invokes it."""
 
-    def test_reports_the_test_only_definition(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_reports_the_test_only_definition(self, stdout_of: StdoutOf) -> None:
         """A definition only its own tests name is reported."""
-        write_tree(PROJECT)
-        _, stdout, _ = run_cli_subprocess(FULL_RUN)
-        assert "orphan" in stdout
+        assert "orphan" in stdout_of(PROJECT, FULL_RUN)
 
-    def test_leaves_the_called_definition_alone(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_leaves_the_called_definition_alone(self, stdout_of: StdoutOf) -> None:
         """A definition another tree calls is not reported."""
-        write_tree(PROJECT)
-        _, stdout, _ = run_cli_subprocess(FULL_RUN)
-        assert "kept" not in stdout
+        assert "kept" not in stdout_of(PROJECT, FULL_RUN)
 
-    def test_findings_fail_the_step(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_findings_fail_the_step(self, exit_code_of: ExitCodeOf) -> None:
         """A finding exits non-zero, which is what fails a job."""
-        write_tree(PROJECT)
-        exit_code, _, _ = run_cli_subprocess(FULL_RUN)
-        assert exit_code == 1
+        assert exit_code_of(PROJECT, FULL_RUN) == 1
 
-    def test_a_clean_tree_passes_the_step(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_clean_tree_passes_the_step(self, exit_code_of: ExitCodeOf) -> None:
         """A tree with nothing to report exits zero."""
-        write_tree(CLEAN_PROJECT)
-        exit_code, _, _ = run_cli_subprocess(CLEAN_RUN)
-        assert exit_code == 0
+        assert exit_code_of(CLEAN_PROJECT, CLEAN_RUN) == 0
 
-    def test_the_outer_bound_is_quiet_on_a_tested_module(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_outer_bound_is_quiet_on_a_tested_module(self, stdout_of: StdoutOf) -> None:
         """Without --dont-search-in a module its own tests exercise reads as used."""
-        write_tree(PROJECT)
-        _, stdout, _ = run_cli_subprocess(OUTER_BOUND)
-        assert "orphan" not in stdout
+        assert "orphan" not in stdout_of(PROJECT, OUTER_BOUND)
 
-    def test_the_console_script_is_installed(
-        self, write_tree: Callable[[dict[str, str]], Path]
-    ) -> None:
+    def test_the_console_script_is_installed(self, write_tree: WriteTree) -> None:
         """The packaged entry point runs under its own name."""
         write_tree(PROJECT)
         result = subprocess.run(
@@ -91,46 +59,26 @@ class TestTheCommandAsAStepRunsIt:
         )
         assert "orphan" in result.stdout
 
-    def test_help_names_the_program(
-        self, run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]]
-    ) -> None:
+    def test_help_names_the_program(self, stdout_of: StdoutOf) -> None:
         """The help text names the command a workflow would call."""
-        _, stdout, _ = run_cli_subprocess(["--help"])
-        assert "assert-python-definition-is-used" in stdout
+        assert "assert-python-definition-is-used" in stdout_of({}, ["--help"])
 
-    def test_no_arguments_is_a_usage_error(
-        self, run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]]
-    ) -> None:
+    def test_no_arguments_is_a_usage_error(self, exit_code_of: ExitCodeOf) -> None:
         """Called with nothing, the command explains itself and fails."""
-        exit_code, _, _ = run_cli_subprocess([])
-        assert exit_code == 2
+        assert exit_code_of({}, []) == 2
 
-    def test_a_missing_tree_exits_two(
-        self, run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]]
-    ) -> None:
+    def test_a_missing_tree_exits_two(self, exit_code_of: ExitCodeOf) -> None:
         """A tree that does not exist is an error rather than a finding."""
-        exit_code, _, _ = run_cli_subprocess(["no/such/tree"])
-        assert exit_code == 2
+        assert exit_code_of({}, ["no/such/tree"]) == 2
 
-    def test_quiet_reports_through_the_exit_code(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_quiet_reports_through_the_exit_code(self, run_over: RunOver) -> None:
         """Quiet mode prints nothing but still fails."""
-        write_tree(PROJECT)
-        exit_code, stdout, _ = run_cli_subprocess([*FULL_RUN, "--quiet"])
+        exit_code, stdout, _ = run_over(PROJECT, [*FULL_RUN, "--quiet"])
         assert (exit_code, stdout) == (1, "")
 
-    def test_warn_only_keeps_a_job_green(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_warn_only_keeps_a_job_green(self, exit_code_of: ExitCodeOf) -> None:
         """Warn-only lets a job report without failing."""
-        write_tree(PROJECT)
-        exit_code, _, _ = run_cli_subprocess([*FULL_RUN, "--warn-only"])
-        assert exit_code == 0
+        assert exit_code_of(PROJECT, [*FULL_RUN, "--warn-only"]) == 0
 
     def test_it_reads_its_own_source_tree(self) -> None:
         """Run against this package, every public definition is used."""
@@ -158,77 +106,39 @@ class TestTheCommandAsAStepRunsIt:
 class TestANoteAsAStepRunsIt:
     """The command over a tree where a note is all that names a definition."""
 
-    def test_reports_the_definition_the_note_is_about(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_reports_the_definition_the_note_is_about(self, stdout_of: StdoutOf) -> None:
         """A definition a comment alone keeps alive is reported."""
-        write_tree(NOTED_PROJECT)
-        _, stdout, _ = run_cli_subprocess(CLEAN_RUN)
-        assert "noted" in stdout
+        assert "noted" in stdout_of(NOTED_PROJECT, CLEAN_RUN)
 
-    def test_the_note_fails_the_step(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_note_fails_the_step(self, exit_code_of: ExitCodeOf) -> None:
         """The finding exits non-zero, which is what fails a job."""
-        write_tree(NOTED_PROJECT)
-        exit_code, _, _ = run_cli_subprocess(CLEAN_RUN)
-        assert exit_code == 1
+        assert exit_code_of(NOTED_PROJECT, CLEAN_RUN) == 1
 
 
 @pytest.mark.e2e
 class TestARuntimeInvokedTreeAsAStepRunsIt:
     """The command over a tree whose definitions a runtime invokes."""
 
-    def test_the_tree_is_refused_without_the_inputs(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_tree_is_refused_without_the_inputs(self, exit_code_of: ExitCodeOf) -> None:
         """A pytest tree has no call sites, so the step fails today."""
-        write_tree(RUNTIME_PROJECT)
-        exit_code, _, _ = run_cli_subprocess(RUNTIME_RUN)
-        assert exit_code == 1
+        assert exit_code_of(RUNTIME_PROJECT, RUNTIME_RUN) == 1
 
-    def test_naming_what_the_runtime_invokes_clears_the_tree(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_naming_what_the_runtime_invokes_clears_the_tree(self, stdout_of: StdoutOf) -> None:
         """With both inputs set only the definition neither claims is reported."""
-        write_tree(RUNTIME_PROJECT)
-        _, stdout, _ = run_cli_subprocess(RUNTIME_ASSUMED)
+        stdout = stdout_of(RUNTIME_PROJECT, RUNTIME_ASSUMED)
         assert stdout.splitlines() == ["test/pkg/test_pkg.py:17:spare"]
 
-    def test_the_step_still_fails_on_what_is_left(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_step_still_fails_on_what_is_left(self, exit_code_of: ExitCodeOf) -> None:
         """An ordinary dead definition in a test tree is still a failure."""
-        write_tree(RUNTIME_PROJECT)
-        exit_code, _, _ = run_cli_subprocess(RUNTIME_ASSUMED)
-        assert exit_code == 1
+        assert exit_code_of(RUNTIME_PROJECT, RUNTIME_ASSUMED) == 1
 
-    def test_a_tree_of_nothing_else_passes(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_a_tree_of_nothing_else_passes(self, exit_code_of: ExitCodeOf) -> None:
         """A test tree holding only what pytest invokes exits zero."""
-        write_tree({"test/pkg/test_pkg.py": "def test_it():\n    assert True\n"})
-        exit_code, _, _ = run_cli_subprocess([*RUNTIME_ASSUMED])
-        assert exit_code == 0
+        tree = {"test/pkg/test_pkg.py": "def test_it():\n    assert True\n"}
+        assert exit_code_of(tree, RUNTIME_ASSUMED) == 0
 
-    def test_the_verbose_summary_names_both_grounds(
-        self,
-        write_tree: Callable[[dict[str, str]], Path],
-        run_cli_subprocess: Callable[[list[str]], tuple[int, str, str]],
-    ) -> None:
+    def test_the_verbose_summary_names_both_grounds(self, stdout_of: StdoutOf) -> None:
         """The step's log says how many definitions each ground took out."""
-        write_tree(RUNTIME_PROJECT)
-        _, stdout, _ = run_cli_subprocess([*RUNTIME_ASSUMED, "--verbose"])
-        assert "Assumed used by name: 2" in stdout
+        assert "Assumed used by name: 2" in stdout_of(
+            RUNTIME_PROJECT, [*RUNTIME_ASSUMED, "--verbose"]
+        )

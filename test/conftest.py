@@ -7,6 +7,7 @@ import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from test.runners import build_runner
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from assert_python_definition_is_used.cli import main
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from test.runners import ExitCodeOf, RunCli, RunOver, StderrOf, StdoutOf, WriteTree
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -24,8 +25,8 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "e2e: end-to-end tests")
 
 
-@pytest.fixture
-def run_cli() -> Callable[[list[str]], tuple[int, str, str]]:
+@pytest.fixture(name="run_cli")
+def run_cli_fixture() -> RunCli:
     """Run the CLI in process, so that coverage sees it.
 
     Returns:
@@ -46,8 +47,8 @@ def run_cli() -> Callable[[list[str]], tuple[int, str, str]]:
     return runner
 
 
-@pytest.fixture
-def run_cli_subprocess() -> Callable[[list[str]], tuple[int, str, str]]:
+@pytest.fixture(name="run_cli_subprocess")
+def run_cli_subprocess_fixture() -> RunCli:
     """Run the CLI as a subprocess, the way a workflow step does.
 
     Returns:
@@ -66,8 +67,8 @@ def run_cli_subprocess() -> Callable[[list[str]], tuple[int, str, str]]:
     return runner
 
 
-@pytest.fixture
-def write_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[dict[str, str]], Path]:
+@pytest.fixture(name="write_tree")
+def write_tree_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> WriteTree:
     """Build a source tree and enter it, because every path here is relative.
 
     Returns:
@@ -84,3 +85,58 @@ def write_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[dic
         return tmp_path
 
     return builder
+
+
+@pytest.fixture(name="run_over")
+def run_over_fixture(write_tree: WriteTree, run_cli: RunCli) -> RunOver:
+    """Build a tree and run over it in process, where coverage can see the run.
+
+    Returns:
+        A function taking a tree and arguments, returning what the run did.
+    """
+    return build_runner(write_tree, run_cli)
+
+
+@pytest.fixture(name="stdout_of")
+def stdout_of_fixture(run_over: RunOver) -> StdoutOf:
+    """Run over a tree and hand back what was reported.
+
+    Returns:
+        A function taking a mapping of relative path to content and the
+        arguments to run, returning stdout.
+    """
+
+    def printed(files: dict[str, str], args: list[str]) -> str:
+        return run_over(files, args)[1]
+
+    return printed
+
+
+@pytest.fixture(name="stderr_of")
+def stderr_of_fixture(run_over: RunOver) -> StderrOf:
+    """Run over a tree and hand back what was complained about.
+
+    Returns:
+        A function taking a mapping of relative path to content and the
+        arguments to run, returning stderr.
+    """
+
+    def complained(files: dict[str, str], args: list[str]) -> str:
+        return run_over(files, args)[2]
+
+    return complained
+
+
+@pytest.fixture(name="exit_code_of")
+def exit_code_of_fixture(run_over: RunOver) -> ExitCodeOf:
+    """Run over a tree and hand back the code a job would read.
+
+    Returns:
+        A function taking a mapping of relative path to content and the
+        arguments to run, returning the exit code.
+    """
+
+    def exited(files: dict[str, str], args: list[str]) -> int:
+        return run_over(files, args)[0]
+
+    return exited
