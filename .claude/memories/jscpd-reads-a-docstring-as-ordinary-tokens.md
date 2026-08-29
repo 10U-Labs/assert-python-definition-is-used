@@ -7,5 +7,4 @@ failed `jscpd (test)`.
 
 Do not reword the docstring to duck it. Move the shared body into a plain
 helper module both conftests call, so the only repetition left is the
-fixture wrapper. See [[pin-jscpd-when-running-it-locally]] for the version
-to check with.
+fixture wrapper.
