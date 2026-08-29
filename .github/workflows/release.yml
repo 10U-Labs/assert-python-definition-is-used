@@ -105,6 +105,25 @@ jobs:
         run: pip install mypy pytest -e .
       - name: mypy (test)
         run: python3 -m mypy test/
+  no-comments:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install assert-no-comments
+      - name: assert-no-comments
+        run: >-
+          assert-no-comments
+          .github/workflows
+          action.yml
+          src
+          test
+          --verbose
   no-inline-directives:
     runs-on: ubuntu-latest
     steps:
@@ -191,6 +210,7 @@ jobs:
       - jscpd-test
       - mypy-src
       - mypy-test
+      - no-comments
       - no-inline-directives
       - no-linter-configs
       - one-assert-per-pytest
