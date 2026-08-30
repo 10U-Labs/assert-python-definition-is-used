@@ -249,10 +249,10 @@ jobs:
         run: pip install build
       - name: Build package
         run: python -m build
-      - name: Push tag
-        run: git push origin "v${{ steps.version.outputs.version }}"
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Push tag
+        run: git push origin "v${{ steps.version.outputs.version }}"
       - env:
           GH_TOKEN: ${{ github.token }}
         name: Create GitHub Release
