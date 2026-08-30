@@ -22,8 +22,10 @@ from assert_python_definition_is_used.cli import (
     determine_exit_code,
     output_findings,
     package_of,
+    package_root,
     parse_patterns,
     read_definitions,
+    read_packages,
     read_sources,
     should_skip,
 )
@@ -47,11 +49,21 @@ RUNTIME_TREE = {
     ),
 }
 
+PACKAGE_TREE = {
+    "lib/python/held/__init__.py": "def widget():\n    pass\n",
+    "lib/python/adrift/__init__.py": "def gadget():\n    pass\n",
+    "src/app.py": "import held\n\nheld.widget()\ngadget()\n",
+}
+
 ASSUMED = ["--assume-used-matching", "test_*", "--assume-used-decorated-with", "pytest.fixture"]
 
 SEARCH_EVERYWHERE = ["--search-in", "lib/python", "--search-in", "src", "--search-in", "test"]
 
 FULL_RUN = ["lib/python", *SEARCH_EVERYWHERE, "--dont-search-in", "test/lib/python/test_{package}"]
+
+PACKAGE_SEARCH = ["lib/python", "--search-in", "lib/python", "--search-in", "src"]
+
+PACKAGE_RUN = [*PACKAGE_SEARCH, "--unimported-packages"]
 
 
 def _arguments(extra: list[str]) -> argparse.Namespace:
@@ -118,6 +130,13 @@ class TestCreateParser:
         with pytest.raises(SystemExit):
             create_parser().parse_args(["lib", "--quiet", "--verbose"])
 
+    def test_reads_the_unimported_packages_flag(self) -> None:
+        parsed = create_parser().parse_args(["lib", "--unimported-packages"])
+        assert parsed.unimported_packages is True
+
+    def test_unimported_packages_defaults_to_false(self) -> None:
+        assert create_parser().parse_args(["lib"]).unimported_packages is False
+
     def test_reads_the_fail_fast_flag(self) -> None:
         assert create_parser().parse_args(["lib", "--fail-fast"]).fail_fast is True
 
@@ -178,6 +197,49 @@ class TestPackageOf:
 
     def test_normalises_a_trailing_separator(self) -> None:
         assert package_of("lib/python/pkg/__init__.py", "lib/python/") == "pkg"
+
+
+@pytest.mark.unit
+class TestPackageRoot:
+    def test_names_a_package_at_its_init(self) -> None:
+        assert package_root("lib/python/pkg/__init__.py", "lib/python") == "pkg"
+
+    def test_a_module_beside_the_init_is_not_a_root(self) -> None:
+        assert package_root("lib/python/pkg/mod.py", "lib/python") is None
+
+    def test_a_nested_package_is_not_a_root(self) -> None:
+        assert package_root("lib/python/pkg/inner/__init__.py", "lib/python") is None
+
+    def test_a_loose_file_is_not_a_root(self) -> None:
+        assert package_root("lib/python/mod.py", "lib/python") is None
+
+    def test_normalises_a_trailing_separator(self) -> None:
+        assert package_root("lib/python/pkg/__init__.py", "lib/python/") == "pkg"
+
+
+@pytest.mark.unit
+class TestReadPackages:
+    def test_names_the_package(self) -> None:
+        found = read_packages({"lib/python/pkg/__init__.py": "lib/python"})
+        assert [item.name for item in found] == ["pkg"]
+
+    def test_anchors_on_the_first_line(self) -> None:
+        found = read_packages({"lib/python/pkg/__init__.py": "lib/python"})
+        assert found[0].line_number == 1
+
+    def test_carries_the_package_through(self) -> None:
+        found = read_packages({"lib/python/pkg/__init__.py": "lib/python"})
+        assert found[0].package == "pkg"
+
+    def test_skips_a_module_that_is_not_an_init(self) -> None:
+        assert not read_packages({"lib/python/pkg/mod.py": "lib/python"})
+
+    def test_reads_the_packages_in_path_order(self) -> None:
+        paths = {
+            "lib/python/b/__init__.py": "lib/python",
+            "lib/python/a/__init__.py": "lib/python",
+        }
+        assert [item.name for item in read_packages(paths)] == ["a", "b"]
 
 
 @pytest.mark.unit
@@ -526,3 +588,28 @@ class TestMainWithAssumptions:
     def test_a_name_outside_the_patterns_is_reported(self, exit_code_of: ExitCodeOf) -> None:
         tree = {"test/pkg/helpers.py": "def spare():\n    pass\n"}
         assert exit_code_of(tree, ["test", *ASSUMED]) == EXIT_FINDINGS
+
+
+@pytest.mark.unit
+class TestMainOverPackages:
+    def test_reports_the_package_nothing_imports(self, stdout_of: StdoutOf) -> None:
+        assert "adrift" in stdout_of(PACKAGE_TREE, PACKAGE_RUN)
+
+    def test_leaves_the_imported_package_alone(self, stdout_of: StdoutOf) -> None:
+        assert "held" not in stdout_of(PACKAGE_TREE, PACKAGE_RUN)
+
+    def test_anchors_the_finding_on_the_init_file(self, stdout_of: StdoutOf) -> None:
+        anchor = os.path.join("lib", "python", "adrift", "__init__.py")
+        assert stdout_of(PACKAGE_TREE, PACKAGE_RUN).splitlines() == [f"{anchor}:1:adrift"]
+
+    def test_the_finding_fails_the_run(self, exit_code_of: ExitCodeOf) -> None:
+        assert exit_code_of(PACKAGE_TREE, PACKAGE_RUN) == EXIT_FINDINGS
+
+    def test_the_definition_check_is_quiet_about_the_same_tree(self, stdout_of: StdoutOf) -> None:
+        assert stdout_of(PACKAGE_TREE, [*PACKAGE_SEARCH, "--count"]) == "0\n"
+
+    def test_verbose_counts_the_packages_read(self, stdout_of: StdoutOf) -> None:
+        assert "Definitions read: 2" in stdout_of(PACKAGE_TREE, [*PACKAGE_RUN, "--verbose"])
+
+    def test_verbose_counts_the_files_scanned(self, stdout_of: StdoutOf) -> None:
+        assert "Files scanned: 2" in stdout_of(PACKAGE_TREE, [*PACKAGE_RUN, "--verbose"])

@@ -27,6 +27,10 @@ inputs:
   trees:
     description: Trees holding the definitions to check (space-separated)
     required: true
+  unimported-packages:
+    default: "false"
+    description: Report packages nothing imports, instead of definitions
+    required: false
   verbose:
     default: "false"
     description: Show trees read, definitions found, findings and a summary
@@ -46,6 +50,8 @@ runs:
         [ "${{ inputs.verbose }}" = "true" ] && ARGS="$ARGS --verbose"
         [ "${{ inputs.fail-fast }}" = "true" ] && ARGS="$ARGS --fail-fast"
         [ "${{ inputs.warn-only }}" = "true" ] && ARGS="$ARGS --warn-only"
+        [ "${{ inputs.unimported-packages }}" = "true" ] &&
+          ARGS="$ARGS --unimported-packages"
         if [ -n "${{ inputs.exclude }}" ]; then
           ARGS="$ARGS --exclude '${{ inputs.exclude }}'"
         fi

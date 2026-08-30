@@ -15,6 +15,7 @@ from .scanner import (
     assumed_used,
     public_definitions,
     read_searched,
+    unimported_packages,
     unused_definitions,
 )
 
@@ -106,6 +107,16 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    parser.add_argument(
+        "--unimported-packages",
+        action="store_true",
+        help=(
+            "Ask the package question instead: report every package under the trees "
+            "that nothing outside its own tests imports. A package is reached by being "
+            "imported, so a name match says nothing about whether it is still wanted."
+        ),
+    )
+
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
         "--quiet",
@@ -181,6 +192,14 @@ def package_of(path: str, tree: str) -> str | None:
     if len(parts) < 2 or parts[0] in ("", os.pardir):
         return None
     return parts[0]
+
+
+def package_root(path: str, tree: str) -> str | None:
+    package = package_of(path, tree)
+    if package is None:
+        return None
+    anchor = os.path.join(os.path.normpath(tree), package, "__init__.py")
+    return package if os.path.normpath(path) == anchor else None
 
 
 def _tree_root(path: str) -> str:
@@ -261,6 +280,15 @@ def read_definitions(
     return definitions
 
 
+def read_packages(paths: dict[str, str]) -> list[Definition]:
+    packages: list[Definition] = []
+    for path in sorted(paths):
+        package = package_root(path, paths[path])
+        if package is not None:
+            packages.append(Definition(path=path, line_number=1, name=package, package=package))
+    return packages
+
+
 def report_unparsed(searched: Searched) -> None:
     for path in searched.unparsed:
         print(f"Searching as text (will not parse): {path}")
@@ -316,6 +344,22 @@ def _report(result: ScanResult, args: argparse.Namespace) -> None:
         output_findings(result.findings, args.count)
 
 
+def _findings_for(
+    args: argparse.Namespace,
+    result: ScanResult,
+    definition_paths: dict[str, str],
+    sources: dict[str, str],
+    searched: Searched,
+) -> list[Finding]:
+    if args.unimported_packages:
+        packages = read_packages(definition_paths)
+        result.files_scanned = result.definitions_read = len(packages)
+        return unimported_packages(packages, searched, args.dont_search_in)
+    definitions = read_definitions(definition_paths, sources, result, args.verbose)
+    checked = assume_used(definitions, args, result)
+    return unused_definitions(checked, searched, args.dont_search_in)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     args = create_parser().parse_args(argv)
     exclude_patterns = parse_patterns(args.exclude)
@@ -340,14 +384,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         print()
 
     sources = read_sources({**search_paths, **definition_paths}, result, args.verbose)
-    definitions = read_definitions(definition_paths, sources, result, args.verbose)
-    definitions = assume_used(definitions, args, result)
     to_search = {path: content for path, content in sources.items() if path in search_paths}
     searched = read_searched(to_search)
     if args.verbose:
         report_unparsed(searched)
 
-    findings = unused_definitions(definitions, searched, args.dont_search_in)
+    findings = _findings_for(args, result, definition_paths, sources, searched)
     result.findings = findings[:1] if (args.fail_fast and findings) else findings
 
     _report(result, args)

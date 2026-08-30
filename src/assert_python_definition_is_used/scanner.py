@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 DEFINITION_NODES = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)
 DOCSTRING_HOLDERS = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Module)
@@ -54,6 +54,7 @@ class Finding:
 class Searched:
     uses: dict[str, frozenset[str]]
     unparsed: dict[str, str]
+    imports: dict[str, frozenset[str]]
 
 
 def is_public(name: str) -> bool:
@@ -163,8 +164,19 @@ def names_used(tree: ast.Module) -> frozenset[str]:
     return frozenset(names)
 
 
+def imported_modules(tree: ast.Module) -> frozenset[str]:
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            modules.add(node.module.split(".")[0])
+    return frozenset(modules)
+
+
 def read_searched(sources: dict[str, str]) -> Searched:
     uses: dict[str, frozenset[str]] = {}
+    imports: dict[str, frozenset[str]] = {}
     unparsed: dict[str, str] = {}
     for path in sorted(sources):
         try:
@@ -173,7 +185,8 @@ def read_searched(sources: dict[str, str]) -> Searched:
             unparsed[path] = sources[path]
             continue
         uses[path] = names_used(tree)
-    return Searched(uses=uses, unparsed=unparsed)
+        imports[path] = imported_modules(tree)
+    return Searched(uses=uses, unparsed=unparsed, imports=imports)
 
 
 def is_assumed_used_by_name(name: str, patterns: Sequence[str]) -> bool:
@@ -228,14 +241,41 @@ def is_used(
     return False
 
 
+def is_imported(
+    definition: Definition, searched: Searched, unsearched: str | None = None
+) -> bool:
+    return any(
+        definition.name in imported
+        for path, imported in searched.imports.items()
+        if not _is_unsearched(path, unsearched)
+    )
+
+
+def _findings_over(
+    definitions: list[Definition],
+    searched: Searched,
+    unsearched_template: str | None,
+    reached: Callable[[Definition, Searched, str | None], bool],
+) -> list[Finding]:
+    findings = []
+    for definition in definitions:
+        unsearched = unsearched_directory(unsearched_template, definition.package)
+        if not reached(definition, searched, unsearched):
+            findings.append(Finding(definition=definition))
+    return findings
+
+
 def unused_definitions(
     definitions: list[Definition],
     searched: Searched,
     unsearched_template: str | None = None,
 ) -> list[Finding]:
-    findings = []
-    for definition in definitions:
-        unsearched = unsearched_directory(unsearched_template, definition.package)
-        if not is_used(definition, searched, unsearched):
-            findings.append(Finding(definition=definition))
-    return findings
+    return _findings_over(definitions, searched, unsearched_template, is_used)
+
+
+def unimported_packages(
+    packages: list[Definition],
+    searched: Searched,
+    unsearched_template: str | None = None,
+) -> list[Finding]:
+    return _findings_over(packages, searched, unsearched_template, is_imported)

@@ -149,3 +149,55 @@ RUNTIME_ASSUMED = [
     "--assume-used-decorated-with",
     "pytest.fixture",
 ]
+
+CLIENTS = """\
+def get_client(service_name):
+    return service_name
+
+
+def get_ssm_client():
+    return get_client("ssm")
+
+
+def reset_clients():
+    return None
+"""
+
+HANDLER = """\
+import boto3
+
+
+def get_ssm_client():
+    return boto3.client("ssm")
+
+
+def handler(event, context):
+    return get_ssm_client()
+"""
+
+RELATIVE = """\
+from .helper import gadget
+
+
+def ring():
+    return gadget()
+"""
+
+SHADOWING_PROJECT = {
+    "lib/python/aws_clients/__init__.py": CLIENTS,
+    "src/handler.py": HANDLER,
+}
+
+PACKAGED_PROJECT = {
+    "lib/python/live/__init__.py": "def widget():\n    return 1\n",
+    "lib/python/live/inner/__init__.py": "def spin():\n    return 2\n",
+    "lib/python/dead/__init__.py": RELATIVE,
+    "lib/python/dead/helper.py": "def gadget():\n    return 3\n",
+    "lib/python/loose.py": "def solo():\n    return 4\n",
+    "src/app.py": "import live\n\nlive.widget()\n",
+    "test/lib/python/test_dead/test_it.py": "import dead\n\ndead.ring()\n",
+}
+
+PACKAGES_RUN = [*FULL_RUN, "--unimported-packages"]
+
+SHADOWED_PACKAGES_RUN = [*CLEAN_RUN, "--unimported-packages"]

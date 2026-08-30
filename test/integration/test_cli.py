@@ -9,11 +9,15 @@ from test.samples import (
     LIB_AND_TEST_RUN,
     NOTED_PROJECT,
     OUTER_BOUND,
+    PACKAGED_PROJECT,
+    PACKAGES_RUN,
     PROJECT,
     PROSE,
     RUNTIME_ASSUMED,
     RUNTIME_PROJECT,
     RUNTIME_RUN,
+    SHADOWED_PACKAGES_RUN,
+    SHADOWING_PROJECT,
 )
 from typing import TYPE_CHECKING
 
@@ -301,3 +305,43 @@ class TestAgainstARuntimeInvokedTree:
     def test_the_verbose_summary_is_unchanged_without_the_inputs(self, stdout_of: StdoutOf) -> None:
         stdout = stdout_of(RUNTIME_PROJECT, [*RUNTIME_RUN, "--verbose"])
         assert "Definitions read: 4\nFindings: 4\n" in stdout
+
+
+@pytest.mark.integration
+class TestAgainstATreeShadowingALibraryName:
+    def test_the_definition_check_credits_the_shadowed_name(self, stdout_of: StdoutOf) -> None:
+        assert "get_ssm_client" not in stdout_of(SHADOWING_PROJECT, CLEAN_RUN)
+
+    def test_the_definition_check_reports_what_nothing_shadows(self, stdout_of: StdoutOf) -> None:
+        assert "reset_clients" in stdout_of(SHADOWING_PROJECT, CLEAN_RUN)
+
+    def test_the_package_nothing_imports_is_reported(self, stdout_of: StdoutOf) -> None:
+        anchor = os.path.join("lib", "python", "aws_clients", "__init__.py")
+        stdout = stdout_of(SHADOWING_PROJECT, SHADOWED_PACKAGES_RUN)
+        assert stdout.splitlines() == [f"{anchor}:1:aws_clients"]
+
+    def test_the_package_check_fails_the_run(self, exit_code_of: ExitCodeOf) -> None:
+        assert exit_code_of(SHADOWING_PROJECT, SHADOWED_PACKAGES_RUN) == EXIT_FINDINGS
+
+
+@pytest.mark.integration
+class TestAgainstPackagesAndTheirImporters:
+    def test_reports_the_package_only_its_own_tests_import(self, stdout_of: StdoutOf) -> None:
+        anchor = os.path.join("lib", "python", "dead", "__init__.py")
+        assert stdout_of(PACKAGED_PROJECT, PACKAGES_RUN).splitlines() == [f"{anchor}:1:dead"]
+
+    def test_leaves_the_imported_package_alone(self, stdout_of: StdoutOf) -> None:
+        assert "live" not in stdout_of(PACKAGED_PROJECT, PACKAGES_RUN)
+
+    def test_a_loose_module_is_no_package(self, stdout_of: StdoutOf) -> None:
+        assert "loose" not in stdout_of(PACKAGED_PROJECT, PACKAGES_RUN)
+
+    def test_a_nested_package_is_not_reported_on_its_own(self, stdout_of: StdoutOf) -> None:
+        assert "inner" not in stdout_of(PACKAGED_PROJECT, PACKAGES_RUN)
+
+    def test_the_own_tests_count_without_the_template(self, stdout_of: StdoutOf) -> None:
+        assert stdout_of(PACKAGED_PROJECT, [*OUTER_BOUND, "--unimported-packages"]) == ""
+
+    def test_a_fully_imported_tree_exits_zero(self, exit_code_of: ExitCodeOf) -> None:
+        run = [*OUTER_BOUND, "--unimported-packages"]
+        assert exit_code_of(PACKAGED_PROJECT, run) == EXIT_SUCCESS

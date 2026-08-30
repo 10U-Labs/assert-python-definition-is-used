@@ -8,13 +8,16 @@ from assert_python_definition_is_used.scanner import (
     Definition,
     Finding,
     assumed_used,
+    imported_modules,
     is_assumed_used_by_decorator,
     is_assumed_used_by_name,
+    is_imported,
     is_public,
     is_used,
     names_in_text,
     names_used,
     read_searched,
+    unimported_packages,
     unsearched_directory,
     public_definitions,
     unused_definitions,
@@ -25,6 +28,10 @@ MODULE = "lib/python/pkg/__init__.py"
 
 def _uses(name: str, content: str) -> bool:
     return name in names_used(ast.parse(content))
+
+
+def _imports(content: str) -> frozenset[str]:
+    return imported_modules(ast.parse(content))
 
 
 def _definition(
@@ -283,6 +290,13 @@ class TestReadSearched:
         searched = read_searched({"src/b.py": "", "src/a.py": ""})
         assert list(searched.uses) == ["src/a.py", "src/b.py"]
 
+    def test_reads_the_imports_of_a_file(self) -> None:
+        searched = read_searched({"src/app.py": "import pkg\n"})
+        assert searched.imports == {"src/app.py": frozenset({"pkg"})}
+
+    def test_a_file_that_will_not_parse_has_no_imports(self) -> None:
+        assert not read_searched({"src/bad.py": "def widget(:\n"}).imports
+
 
 @pytest.mark.unit
 class TestIsAssumedUsedByName:
@@ -477,3 +491,103 @@ class TestUnusedDefinitions:
 
     def test_no_definitions_means_no_findings(self) -> None:
         assert not unused_definitions([], read_searched({MODULE: ""}))
+
+
+@pytest.mark.unit
+class TestImportedModules:
+    def test_reads_a_plain_import(self) -> None:
+        assert _imports("import pkg\n") == frozenset({"pkg"})
+
+    def test_reads_only_the_top_level_of_a_dotted_import(self) -> None:
+        assert _imports("import pkg.inner.mod\n") == frozenset({"pkg"})
+
+    def test_reads_a_renamed_import(self) -> None:
+        assert _imports("import pkg as shortcut\n") == frozenset({"pkg"})
+
+    def test_reads_every_name_in_one_import(self) -> None:
+        assert _imports("import one, two\n") == frozenset({"one", "two"})
+
+    def test_reads_a_from_import(self) -> None:
+        assert _imports("from pkg import widget\n") == frozenset({"pkg"})
+
+    def test_reads_only_the_top_level_of_a_dotted_from_import(self) -> None:
+        assert _imports("from pkg.inner import widget\n") == frozenset({"pkg"})
+
+    def test_reads_an_import_buried_in_a_function(self) -> None:
+        assert _imports("def entry():\n    import pkg\n") == frozenset({"pkg"})
+
+    def test_a_bare_relative_import_names_no_package(self) -> None:
+        assert not _imports("from . import widget\n")
+
+    def test_a_relative_module_import_names_no_package(self) -> None:
+        assert not _imports("from .inner import widget\n")
+
+    def test_naming_a_module_is_not_importing_it(self) -> None:
+        assert not _imports("pkg.widget()\n")
+
+    def test_an_empty_file_imports_nothing(self) -> None:
+        assert not _imports("")
+
+
+@pytest.mark.unit
+class TestIsImported:
+    def test_a_sibling_module_importing_it_counts(self) -> None:
+        sources = {MODULE: "", "src/app.py": "import pkg\n"}
+        assert is_imported(_definition(name="pkg"), read_searched(sources)) is True
+
+    def test_a_from_import_counts(self) -> None:
+        sources = {MODULE: "", "src/app.py": "from pkg import widget\n"}
+        assert is_imported(_definition(name="pkg"), read_searched(sources)) is True
+
+    def test_a_name_written_as_a_bare_word_is_not_an_import(self) -> None:
+        sources = {MODULE: "", "src/app.py": "def get_client():\n    pass\n"}
+        package = _definition(name="get_client", package="get_client")
+        assert is_imported(package, read_searched(sources)) is False
+
+    def test_a_file_that_will_not_parse_does_not_import(self) -> None:
+        sources = {MODULE: "", "src/bad.py": "import pkg(\n"}
+        assert is_imported(_definition(name="pkg"), read_searched(sources)) is False
+
+    def test_an_unsearched_directory_is_discounted(self) -> None:
+        sources = {MODULE: "", "test/pkg/test_it.py": "import pkg\n"}
+        found = is_imported(_definition(name="pkg"), read_searched(sources), "test/pkg/")
+        assert found is False
+
+    def test_another_directory_still_counts(self) -> None:
+        sources = {MODULE: "", "test/other/test_it.py": "import pkg\n"}
+        found = is_imported(_definition(name="pkg"), read_searched(sources), "test/pkg/")
+        assert found is True
+
+    def test_nothing_to_search_means_unimported(self) -> None:
+        assert is_imported(_definition(name="pkg"), read_searched({})) is False
+
+
+@pytest.mark.unit
+class TestUnimportedPackages:
+    def test_reports_a_package_nothing_imports(self) -> None:
+        sources = {MODULE: "def widget():\n    pass\n"}
+        found = unimported_packages([_definition(name="pkg")], read_searched(sources))
+        assert len(found) == 1
+
+    def test_stays_quiet_about_a_package_a_sibling_imports(self) -> None:
+        sources = {MODULE: "", "src/app.py": "import pkg\n"}
+        assert not unimported_packages([_definition(name="pkg")], read_searched(sources))
+
+    def test_reports_a_package_only_its_own_tests_import(self) -> None:
+        sources = {MODULE: "", "test/lib/python/test_pkg/test_it.py": "import pkg\n"}
+        found = unimported_packages(
+            [_definition(name="pkg")], read_searched(sources), "test/lib/python/test_{package}"
+        )
+        assert len(found) == 1
+
+    def test_reports_the_package_whose_name_is_only_ever_a_bare_word(self) -> None:
+        sources = {MODULE: "", "src/app.py": "def get_client():\n    return 1\n"}
+        packages = [_definition(name="get_client", package="get_client")]
+        assert len(unimported_packages(packages, read_searched(sources))) == 1
+
+    def test_anchors_the_finding_on_the_init_file(self) -> None:
+        found = unimported_packages([_definition(name="pkg")], read_searched({MODULE: ""}))
+        assert str(found[0]) == f"{MODULE}:1:pkg"
+
+    def test_no_packages_means_no_findings(self) -> None:
+        assert not unimported_packages([], read_searched({MODULE: ""}))

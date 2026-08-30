@@ -6,8 +6,11 @@ import runpy
 import sys
 from test.samples import (
     CALLER,
+    HANDLER,
     LIBRARY,
+    PACKAGED_PROJECT,
     PROJECT,
+    RELATIVE,
     RUNTIME_ASSUMED,
     RUNTIME_INVOKED,
     RUNTIME_PROJECT,
@@ -36,8 +39,10 @@ from assert_python_definition_is_used.cli import (
     determine_exit_code,
     output_findings,
     package_of,
+    package_root,
     parse_patterns,
     read_definitions,
+    read_packages,
     read_sources,
     should_skip,
 )
@@ -45,13 +50,16 @@ from assert_python_definition_is_used.scanner import (
     Definition,
     Finding,
     assumed_used,
+    imported_modules,
     is_assumed_used_by_decorator,
     is_assumed_used_by_name,
+    is_imported,
     is_public,
     is_used,
     names_in_text,
     names_used,
     read_searched,
+    unimported_packages,
     unsearched_directory,
     public_definitions,
     unused_definitions,
@@ -347,3 +355,54 @@ class TestAssumptionsOverRealFiles:
     def test_the_parser_defaults_both_to_none(self) -> None:
         parsed = create_parser().parse_args(RUNTIME_RUN)
         assert (parsed.assume_used_matching, parsed.assume_used_decorated_with) == (None, None)
+
+
+@pytest.mark.integration
+class TestPackagesOverRealFiles:
+    def test_collect_finds_the_package_roots(self, write_tree: WriteTree) -> None:
+        write_tree(PACKAGED_PROJECT)
+        collected, _ = _collect(["lib/python"], [])
+        assert sorted(item.name for item in read_packages(collected)) == ["dead", "live"]
+
+    def test_a_nested_package_is_not_a_root(self) -> None:
+        assert package_root(os.path.join("lib", "python", "a", "b", "__init__.py"), "lib") is None
+
+    def test_a_package_init_is_a_root(self) -> None:
+        assert package_root(os.path.join("lib", "python", "__init__.py"), "lib") == "python"
+
+    def test_read_packages_anchors_on_line_one(self, write_tree: WriteTree) -> None:
+        write_tree(PACKAGED_PROJECT)
+        collected, _ = _collect(["lib/python"], [])
+        assert {item.line_number for item in read_packages(collected)} == {1}
+
+    def test_imported_modules_reads_an_import(self) -> None:
+        assert imported_modules(ast.parse(HANDLER)) == frozenset({"boto3"})
+
+    def test_imported_modules_reads_a_from_import(self) -> None:
+        assert imported_modules(ast.parse(CALLER)) == frozenset({"pkg"})
+
+    def test_imported_modules_skips_a_relative_import(self) -> None:
+        assert not imported_modules(ast.parse(RELATIVE))
+
+    def test_read_searched_keeps_the_imports(self) -> None:
+        assert read_searched({"src/app.py": CALLER}).imports["src/app.py"] == frozenset({"pkg"})
+
+    def test_is_imported_reads_the_sources(self) -> None:
+        package = Definition(path="lib/python/pkg/__init__.py", line_number=1, name="pkg",
+                             package="pkg")
+        assert is_imported(package, read_searched({"src/app.py": CALLER}))
+
+    def test_a_bare_name_is_not_an_import(self) -> None:
+        package = Definition(path="lib/python/pkg/__init__.py", line_number=1, name="pkg",
+                             package="pkg")
+        assert not is_imported(package, read_searched({"src/app.py": "pkg = 1\n"}))
+
+    def test_unimported_packages_reports(self) -> None:
+        package = Definition(path="lib/python/pkg/__init__.py", line_number=1, name="pkg",
+                             package="pkg")
+        found = unimported_packages([package], read_searched({"src/app.py": "pkg = 1\n"}))
+        assert len(found) == 1
+
+    def test_the_parser_reads_the_unimported_packages_flag(self) -> None:
+        parsed = create_parser().parse_args(["lib", "--unimported-packages"])
+        assert parsed.unimported_packages is True

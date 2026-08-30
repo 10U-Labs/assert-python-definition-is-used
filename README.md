@@ -52,6 +52,7 @@ tests written for it, which is what a coverage gate hides.
 | `--exclude PATTERNS` | Comma-separated globs to leave out of both trees. |
 | `--assume-used-matching PATTERNS` | Globs of names a runtime invokes. |
 | `--assume-used-decorated-with PATHS` | Decorators a runtime invokes. |
+| `--unimported-packages` | Report packages nothing imports, not definitions. |
 | `--quiet` | Print nothing; report through the exit code. |
 | `--count` | Print only how many findings there were. |
 | `--verbose` | Print each file scanned, each one read as text, and a summary. |
@@ -96,7 +97,8 @@ file rather than failing, and `--verbose` names each file that fell back.
 
 Reading a name is still not resolving it. A file that calls its own
 unrelated function of the same name counts as a use, so the count is a
-lower bound rather than an exact figure.
+lower bound rather than an exact figure. `--unimported-packages` below
+asks a question that survives that, one package at a time.
 
 Two dead functions in one file that call each other still read as used,
 because those calls are real code. Finding those needs reachability from
@@ -168,6 +170,53 @@ the run altogether, so its own definitions go unchecked too. A file left
 out of the search is still read for the definitions it holds; it just
 does not get a vote on whether anything else is used.
 
+## Packages nothing imports
+
+A function is reached by being named, so asking what names it is the
+right question. A package is reached by being imported, which is a
+different question with a different answer. A package can be entirely
+dead while every one of its names still appears somewhere, because the
+caller that reimplemented it picked the same ordinary words.
+
+The name search is blind in proportion to how ordinary a package's names
+are. A package of `get_client`, `set_client` and `reset_clients` is
+nearly invisible to it, those words appearing everywhere; a package of
+`resolve_terraform_interpolation` is fully visible, that word appearing
+nowhere else. That is backwards, because the packages most likely to be
+quietly reimplemented are exactly the ones whose names are ordinary
+enough for a caller to pick the same ones.
+
+`--unimported-packages` asks the other question. It reads every directory
+directly below a definition tree that holds an `__init__.py`, collects
+the top-level module of every `import` and `from ... import` in the
+searched files, and reports each package nothing imports. The finding is
+anchored on the package's `__init__.py` at line 1, in the same
+`path:line:name` form as the rest:
+
+```text
+lib/python/aws_clients/__init__.py:1:aws_clients
+```
+
+`--dont-search-in` applies here as it does elsewhere, so a package
+imported only by its own tests is reported:
+
+```bash
+assert-python-definition-is-used lib/python \
+  --search-in lib/python --search-in src --search-in test \
+  --dont-search-in 'test/lib/python/test_{package}' \
+  --unimported-packages
+```
+
+It is a mode rather than a check folded into every run, because the two
+questions have different answers for a directory with no `__init__.py`,
+and because a repository may want one without the other. Run it as a
+second job beside the definition run.
+
+A relative import names no top-level module, so `from . import helper`
+inside a package does not make that package imported. A file that will
+not parse credits nothing here either: a bare word in text is not an
+import, and guessing one from text would be worse than staying quiet.
+
 ## GitHub Actions
 
 ```yaml
@@ -177,6 +226,19 @@ does not get a vote on whether anything else is used.
     dont-search-in: test/lib/python/test_{package}
     search-in: lib/python scripts src test
     trees: lib/python
+    verbose: true
+```
+
+Beside it, ask whether the packages are imported at all:
+
+```yaml
+- name: Assert every package is imported outside its own tests
+  uses: 10U-Labs/assert-python-definition-is-used@latest
+  with:
+    dont-search-in: test/lib/python/test_{package}
+    search-in: lib/python scripts src test
+    trees: lib/python
+    unimported-packages: true
     verbose: true
 ```
 
