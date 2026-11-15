@@ -33,7 +33,7 @@ jobs:
       - name: assert-no-inline-directives
         run: >-
           assert-no-inline-directives
-          --tools pylint,mypy,yamllint
+          --tools markdownlint,mypy,pylint,yamllint
           --verbose
           ${{ github.workspace }}/**/*
   assert-no-linter-config-files:
@@ -50,7 +50,7 @@ jobs:
       - name: assert-no-linter-config-files
         run: >-
           assert-no-linter-config-files
-          --linters pylint,mypy,yamllint
+          --linters markdownlint,mypy,pylint,yamllint
           --verbose
           ${{ github.workspace }}
   assert-one-assert-per-pytest:
@@ -301,14 +301,14 @@ jobs:
           RULES="$EMPTY_LINES, $KEY_ORDERING, $TRUTHY"
           yamllint --strict --format github \
             --config-data "{extends: default, rules: {$RULES}}" \
-            action.yml .github/workflows/*.yml
+            action.yml .github/workflows/release.yml
 name: release
 on:
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/documentation.yml"
+      - ".github/workflows/markdownlint.yml"
       - ".github/workflows/release.yml"
       - "action.yml"
       - "pyproject.toml"
