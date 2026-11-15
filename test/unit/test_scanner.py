@@ -140,6 +140,55 @@ class TestPublicDefinitions:
 
 
 @pytest.mark.unit
+class TestPublicDefinitionsReadingAssignments:
+    def test_finds_a_constant(self) -> None:
+        assert [item.name for item in public_definitions(MODULE, "WIDGET = 1\n")] == ["WIDGET"]
+
+    def test_records_the_line_of_a_constant(self) -> None:
+        assert public_definitions(MODULE, "\nWIDGET = 1\n")[0].line_number == 2
+
+    def test_a_constant_carries_no_decorators(self) -> None:
+        assert public_definitions(MODULE, "WIDGET = 1\n")[0].decorators == ()
+
+    def test_finds_an_annotated_constant(self) -> None:
+        found = public_definitions(MODULE, "WIDGET: Final[int] = 1\n")
+        assert [item.name for item in found] == ["WIDGET"]
+
+    def test_skips_an_annotation_that_binds_nothing(self) -> None:
+        assert not public_definitions(MODULE, "WIDGET: int\n")
+
+    def test_finds_every_name_of_a_tuple_target(self) -> None:
+        found = public_definitions(MODULE, "LEFT, RIGHT = 1, 2\n")
+        assert [item.name for item in found] == ["LEFT", "RIGHT"]
+
+    def test_finds_every_name_of_a_list_target(self) -> None:
+        found = public_definitions(MODULE, "[LEFT, RIGHT] = 1, 2\n")
+        assert [item.name for item in found] == ["LEFT", "RIGHT"]
+
+    def test_finds_every_name_of_a_chained_assignment(self) -> None:
+        found = public_definitions(MODULE, "LEFT = RIGHT = 1\n")
+        assert [item.name for item in found] == ["LEFT", "RIGHT"]
+
+    def test_skips_a_private_constant(self) -> None:
+        assert not public_definitions(MODULE, "_WIDGET = 1\n")
+
+    def test_skips_an_augmented_assignment(self) -> None:
+        assert not public_definitions(MODULE, "WIDGET += 1\n")
+
+    def test_skips_an_attribute_target(self) -> None:
+        assert not public_definitions(MODULE, "settings.mode = 1\n")
+
+    def test_skips_an_assignment_inside_a_function(self) -> None:
+        found = public_definitions(MODULE, "def widget():\n    SIZE = 1\n")
+        assert [item.name for item in found] == ["widget"]
+
+    def test_keeps_source_order_across_kinds(self) -> None:
+        content = "def one():\n    pass\nTWO = 2\nclass Three:\n    pass\n"
+        found = public_definitions(MODULE, content)
+        assert [item.name for item in found] == ["one", "TWO", "Three"]
+
+
+@pytest.mark.unit
 class TestPublicDefinitionsReadingDecorators:
     def test_an_undecorated_definition_carries_nothing(self) -> None:
         found = public_definitions(MODULE, "def widget():\n    pass\n")
@@ -266,6 +315,9 @@ class TestNamesUsed:
     def test_ignores_a_rebinding(self) -> None:
         assert _uses("widget", "widget = 3\n") is False
 
+    def test_ignores_the_assignment_of_a_constant(self) -> None:
+        assert _uses("WIDGET", "WIDGET: int = 3\n") is False
+
     def test_ignores_an_unrelated_name(self) -> None:
         assert _uses("widget", "other()\n") is False
 
@@ -371,6 +423,11 @@ class TestAssumedUsed:
     def test_empty_inputs_change_nothing(self) -> None:
         held = [_definition(name="test_widget", decorators=("pytest.fixture",))]
         assert assumed_used(held, [], []) == (held, [], [])
+
+    def test_a_constant_matched_by_name_is_assumed_used(self) -> None:
+        held = public_definitions(MODULE, "pytest_plugins = []\n")
+        _, by_name, _ = assumed_used(held, ["pytest_*"], [])
+        assert [item.name for item in by_name] == ["pytest_plugins"]
 
     def test_keeps_source_order(self) -> None:
         held = [_definition(name="one"), _definition(name="test_two"), _definition(name="three")]

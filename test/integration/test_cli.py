@@ -5,6 +5,7 @@ from test.samples import (
     ADVERTISING_PROJECT,
     CLEAN_PROJECT,
     CLEAN_RUN,
+    CONSTANT_PROJECT,
     FULL_RUN,
     LIB_AND_TEST_RUN,
     NOTED_PROJECT,
@@ -13,6 +14,7 @@ from test.samples import (
     PACKAGES_RUN,
     PROJECT,
     PROSE,
+    READ_CONSTANT_PROJECT,
     RUNTIME_ASSUMED,
     RUNTIME_PROJECT,
     RUNTIME_RUN,
@@ -97,6 +99,27 @@ class TestAgainstARealTree:
             ["lib/python", "--search-in", "lib/python", "--search-in", "src"],
         )
         assert stdout == ""
+
+
+@pytest.mark.integration
+class TestAgainstATreeHoldingConstants:
+    def test_reports_every_public_constant_nothing_reads(self, stdout_of: StdoutOf) -> None:
+        module = os.path.join("lib", "python", "pkg", "__init__.py")
+        assert stdout_of(CONSTANT_PROJECT, ["lib/python"]).splitlines() == [
+            f"{module}:1:WIDGET",
+            f"{module}:2:LEFT",
+            f"{module}:2:RIGHT",
+            f"{module}:3:SIZE",
+        ]
+
+    def test_an_unread_constant_fails_the_run(self, exit_code_of: ExitCodeOf) -> None:
+        assert exit_code_of(CONSTANT_PROJECT, ["lib/python"]) == EXIT_FINDINGS
+
+    def test_leaves_a_constant_something_reads_alone(self, stdout_of: StdoutOf) -> None:
+        assert stdout_of(READ_CONSTANT_PROJECT, CLEAN_RUN) == ""
+
+    def test_leaves_the_constant_the_caller_reads_alone(self, stdout_of: StdoutOf) -> None:
+        assert "DEFAULT" not in stdout_of(PROJECT, FULL_RUN)
 
 
 @pytest.mark.integration
@@ -239,17 +262,17 @@ class TestBrokenInput:
 @pytest.mark.integration
 class TestSelectingFiles:
     def test_a_directory_is_walked(self, stdout_of: StdoutOf) -> None:
-        assert stdout_of(PROJECT, ["lib/python", "--count"]) == "1\n"
+        assert stdout_of(PROJECT, ["lib/python", "--count"]) == "2\n"
 
     def test_a_file_can_be_named_directly(self, stdout_of: StdoutOf) -> None:
         named = os.path.join("lib", "python", "pkg", "__init__.py")
-        assert stdout_of(PROJECT, [named, "--count"]) == "1\n"
+        assert stdout_of(PROJECT, [named, "--count"]) == "2\n"
 
     def test_a_recursive_glob_reaches_the_files(self, stdout_of: StdoutOf) -> None:
-        assert stdout_of(PROJECT, ["lib/python/**/*.py", "--count"]) == "1\n"
+        assert stdout_of(PROJECT, ["lib/python/**/*.py", "--count"]) == "2\n"
 
     def test_a_glob_matching_a_directory_is_walked(self, stdout_of: StdoutOf) -> None:
-        assert stdout_of(PROJECT, ["lib/python/*", "--count"]) == "1\n"
+        assert stdout_of(PROJECT, ["lib/python/*", "--count"]) == "2\n"
 
     def test_a_glob_matching_nothing_is_missing(self, stderr_of: StderrOf) -> None:
         assert "Path not found" in stderr_of(PROJECT, ["lib/python/*.rs"])
@@ -260,7 +283,7 @@ class TestSelectingFiles:
 
     def test_a_non_python_file_is_ignored(self, stdout_of: StdoutOf) -> None:
         noted = {**PROJECT, "lib/python/pkg/notes.txt": "def orphan():\n"}
-        assert stdout_of(noted, ["lib/python", "--count"]) == "1\n"
+        assert stdout_of(noted, ["lib/python", "--count"]) == "2\n"
 
     def test_an_exclude_drops_a_definition_file(self, stdout_of: StdoutOf) -> None:
         run = ["lib/python", "--exclude", "__init__.py", "--count"]

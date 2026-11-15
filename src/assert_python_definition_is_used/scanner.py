@@ -77,18 +77,39 @@ def _decorators_of(node: ast.AsyncFunctionDef | ast.ClassDef | ast.FunctionDef) 
     return tuple(dotted for dotted in flattened if dotted is not None)
 
 
+def _target_names(target: ast.expr) -> tuple[str, ...]:
+    if isinstance(target, ast.Name):
+        return (target.id,)
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return tuple(name for element in target.elts for name in _target_names(element))
+    return ()
+
+
+def _names_bound(node: ast.stmt) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if isinstance(node, DEFINITION_NODES):
+        return ((node.name, _decorators_of(node)),)
+    if isinstance(node, ast.Assign):
+        targets: list[ast.expr] = list(node.targets)
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets = [node.target]
+    else:
+        return ()
+    return tuple((name, ()) for target in targets for name in _target_names(target))
+
+
 def public_definitions(path: str, content: str, package: str | None = None) -> list[Definition]:
     tree = ast.parse(content, filename=path)
     return [
         Definition(
             path=path,
             line_number=node.lineno,
-            name=node.name,
+            name=name,
             package=package,
-            decorators=_decorators_of(node),
+            decorators=decorators,
         )
         for node in tree.body
-        if isinstance(node, DEFINITION_NODES) and is_public(node.name)
+        for name, decorators in _names_bound(node)
+        if is_public(name)
     ]
 
 

@@ -6,6 +6,7 @@ import sys
 from test.samples import (
     CLEAN_PROJECT,
     CLEAN_RUN,
+    CONSTANT_PROJECT,
     FULL_RUN,
     NOTED_PROJECT,
     OUTER_BOUND,
@@ -84,6 +85,15 @@ class TestTheCommandAsAStepRunsIt:
             cwd=root,
         )
         assert result.stdout == ""
+
+
+@pytest.mark.e2e
+class TestAnUnreadConstantAsAStepRunsIt:
+    def test_the_constant_fails_the_step(self, exit_code_of: ExitCodeOf) -> None:
+        assert exit_code_of(CONSTANT_PROJECT, ["lib/python"]) == 1
+
+    def test_the_constant_is_named(self, stdout_of: StdoutOf) -> None:
+        assert "WIDGET" in stdout_of(CONSTANT_PROJECT, ["lib/python"])
 
 
 @pytest.mark.e2e

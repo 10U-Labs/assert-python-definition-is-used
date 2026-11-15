@@ -17,10 +17,27 @@ DEFAULT = helper()
 """
 
 CALLER = """\
-from pkg import kept
+from pkg import DEFAULT, kept
 
 kept()
 """
+
+CONSTANTS = """\
+WIDGET = 1
+LEFT, RIGHT = 1, 2
+SIZE: int = 3
+DECLARED: int
+WIDGET += 1
+settings.mode = "fast"
+_HIDDEN = 4
+"""
+
+CONSTANT_PROJECT = {"lib/python/pkg/__init__.py": CONSTANTS}
+
+READ_CONSTANT_PROJECT = {
+    "lib/python/pkg/__init__.py": "WIDGET = 1\n",
+    "src/app.py": "from pkg import WIDGET\n",
+}
 
 OWN_TESTS = """\
 from pkg import orphan

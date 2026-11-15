@@ -6,6 +6,8 @@ import runpy
 import sys
 from test.samples import (
     CALLER,
+    CONSTANT_PROJECT,
+    CONSTANTS,
     HANDLER,
     LIBRARY,
     PACKAGED_PROJECT,
@@ -69,6 +71,13 @@ if TYPE_CHECKING:
     from test.runners import WriteTree
 
 
+def _names_defined_in(write_tree: WriteTree, tree: dict[str, str]) -> list[str]:
+    write_tree(tree)
+    path = os.path.join("lib", "python", "pkg", "__init__.py")
+    found = public_definitions(path, _read(path, ScanResult(), False) or "", "pkg")
+    return [item.name for item in found]
+
+
 @pytest.mark.integration
 class TestHelpersOverRealFiles:
     def test_walk_finds_the_python_files(self, write_tree: WriteTree) -> None:
@@ -119,7 +128,7 @@ class TestHelpersOverRealFiles:
         write_tree(PROJECT)
         collected, _ = _collect(["lib/python"], [])
         found = read_definitions(collected, read_sources(collected, ScanResult()), ScanResult())
-        assert [item.name for item in found] == ["kept", "orphan", "helper"]
+        assert [item.name for item in found] == ["kept", "orphan", "helper", "DEFAULT"]
 
     def test_read_definitions_names_files_when_verbose(
         self,
@@ -211,10 +220,15 @@ class TestReportingHelpers:
 @pytest.mark.integration
 class TestScannerOverRealFiles:
     def test_public_definitions_reads_a_file(self, write_tree: WriteTree) -> None:
-        write_tree(PROJECT)
-        path = os.path.join("lib", "python", "pkg", "__init__.py")
-        found = public_definitions(path, _read(path, ScanResult(), False) or "", "pkg")
-        assert [item.name for item in found] == ["kept", "orphan", "helper"]
+        names = _names_defined_in(write_tree, PROJECT)
+        assert names == ["kept", "orphan", "helper", "DEFAULT"]
+
+    def test_public_definitions_reads_the_constants_of_a_file(self, write_tree: WriteTree) -> None:
+        names = _names_defined_in(write_tree, CONSTANT_PROJECT)
+        assert names == ["WIDGET", "LEFT", "RIGHT", "SIZE"]
+
+    def test_names_used_ignores_the_assignment_of_a_constant(self) -> None:
+        assert "WIDGET" not in names_used(ast.parse(CONSTANTS))
 
     def test_public_definitions_raises_on_bad_python(self) -> None:
         with pytest.raises(SyntaxError):

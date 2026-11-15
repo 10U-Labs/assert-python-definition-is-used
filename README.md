@@ -13,9 +13,9 @@ coverage measures whether lines run, not whether anything wants them,
 and a module held at 100% by its own tests manufactures exactly the
 evidence that makes it look used.
 
-This tool asks the other question. For every public top-level `def` and
-`class` in the trees you point it at, it asks whether anything else
-names it, and reports the ones nothing does.
+This tool asks the other question. For every public top-level `def`,
+`class` and assigned constant in the trees you point it at, it asks
+whether anything else names it, and reports the ones nothing does.
 
 ## Installation
 
@@ -83,8 +83,8 @@ was removed cannot keep alive the definition it names. A docstring and an
 rather than a use of it, and crediting them would leave a dead definition
 unreported. A re-export still reads as used, because the `__all__` entry
 naming a definition comes with the import that brings it in, and an
-import is a read. A `def` or `class` statement binds its name without
-reading it, so nothing counts as its own use.
+import is a read. A `def` or `class` statement or an assignment binds
+its name without reading it, so nothing counts as its own use.
 
 The file a definition lives in is read no differently from any other. A
 function its own file calls is a helper doing its job, and reporting it
@@ -104,10 +104,15 @@ Two dead functions in one file that call each other still read as used,
 because those calls are real code. Finding those needs reachability from
 a live entry point, which is a different tool.
 
-Only top-level `def` and `class` statements are read. A method and a
-nested function are reached through the name of the thing that holds
-them, so neither is something this tool can speak about. Names starting
-with an underscore are skipped.
+Only top-level `def` and `class` statements and top-level assignments
+are read. An assignment counts once per name it binds, so
+`LEFT, RIGHT = 1, 2` gives two. An augmented assignment such as
+`TOTAL += 1` is not read, because it changes a name bound elsewhere,
+and an annotation with no value, such as `TOTAL: int`, binds nothing. A
+method and a nested function are reached through the name of the thing
+that holds them, and a name assigned inside a function exists only
+while it runs, so none of them is something this tool can speak about.
+Names starting with an underscore are skipped.
 
 ## Definitions a runtime invokes
 
