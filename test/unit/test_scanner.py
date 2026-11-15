@@ -182,6 +182,9 @@ class TestPublicDefinitionsReadingAssignments:
         found = public_definitions(MODULE, "def widget():\n    SIZE = 1\n")
         assert [item.name for item in found] == ["widget"]
 
+    def test_the_assignment_of_a_constant_is_not_its_own_use(self) -> None:
+        assert _uses("WIDGET", "WIDGET: int = 3\n") is False
+
     def test_keeps_source_order_across_kinds(self) -> None:
         content = "def one():\n    pass\nTWO = 2\nclass Three:\n    pass\n"
         found = public_definitions(MODULE, content)
@@ -314,9 +317,6 @@ class TestNamesUsed:
 
     def test_ignores_a_rebinding(self) -> None:
         assert _uses("widget", "widget = 3\n") is False
-
-    def test_ignores_the_assignment_of_a_constant(self) -> None:
-        assert _uses("WIDGET", "WIDGET: int = 3\n") is False
 
     def test_ignores_an_unrelated_name(self) -> None:
         assert _uses("widget", "other()\n") is False
