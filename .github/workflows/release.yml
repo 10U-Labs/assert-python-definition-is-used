@@ -299,10 +299,9 @@ jobs:
           KEY_ORDERING='key-ordering: enable'
           TRUTHY='truthy: {allowed-values: ["true", "false", "on"]}'
           RULES="$EMPTY_LINES, $KEY_ORDERING, $TRUTHY"
-          shopt -s globstar
           yamllint --strict --format github \
             --config-data "{extends: default, rules: {$RULES}}" \
-            *.yml **/*.yml
+            action.yml .github/workflows/*.yml
 name: release
 on:
   push:
