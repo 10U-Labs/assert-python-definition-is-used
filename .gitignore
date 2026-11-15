@@ -14,6 +14,7 @@
 .DS_Store
 .Python
 .cache
+.claude/settings.local.json
 .coverage
 .coverage.*
 .dmypy.json
